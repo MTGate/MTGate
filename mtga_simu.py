@@ -130,18 +130,22 @@ resp = requests.post("https://api.platform.wizards.com/auth/oauth/token",
 
 access_token = resp.json()["access_token"]
 refresh_token = resp.json()["refresh_token"]
+client_id = resp.json()["client_id"]
+game_id = resp.json()["game_id"]
+domain_id = resp.json()["domain_id"]
+persona_id = resp.json()["persona_id"]
+account_id = resp.json()["account_id"]
 # expires_in, token_type, client_id, game_id, domain_id, persona_id, account_id, display_name
 
 # get profile
 resp = requests.get("https://api.platform.wizards.com/profile",
 					 headers={ "Authorization": f"Bearer {access_token}" })
 account_id = resp.json()["accountID"]
-print(account_id)
-
-
-def packet_str(data: str) -> bytes:
-	byte_length = len(data.encode())
-	return bytes([3, 1]) + byte_length.to_bytes(4, 'little') + data.encode()
+# print(f'{client_id=}')
+# print(f'{game_id=}')
+# print(f'{domain_id=}')
+# print(f'{persona_id=}')
+# print(f'{account_id=}')
 
 import socket
 import ssl
@@ -160,12 +164,19 @@ class StreamChatter:
         self.reply = {}
         self.ssock = ssock
     
+    @staticmethod
+    def packet_str(data: str) -> bytes:
+        byte_length = len(data.encode())
+        return bytes([3, 1]) + byte_length.to_bytes(4, 'little') + data.encode()
+
     # check the inbox, make sure first there should be something
     def check(self) -> bytes:
         try:
             self.buf += self.ssock.recv()
         except TimeoutError:
             pass
+        # if len(self.buf) == 0: # timeout test
+        #     some_counter += 1
         if len(self.buf) < 6:
             raise RuntimeError(self.buf)
         if self.buf[0] == 0x03 and self.buf[1] == 0x02: # ping
@@ -191,7 +202,7 @@ class StreamChatter:
             raise RuntimeError(self.buf)
 
     def speak(self, message: dict):
-        self.ssock.send(packet_str(json.dumps(message, separators=(',', ':'))))
+        self.ssock.send(StreamChatter.packet_str(json.dumps(message, separators=(',', ':'))))
 
     def ping(self, timestamp=555):
         self.ssock.send(bytes([3, 2]) + (4).to_bytes(4, 'little') + timestamp.to_bytes(4, 'little'))
@@ -318,7 +329,7 @@ with socket.create_connection(address=(parse_result.hostname, parse_result.port)
         print(resp)
 
         import time
-        for _ in range(10):
+        for _ in range(20):
             time.sleep(1)
             resp = chatter.check()
             if 'valid' == chatter.flag:
@@ -337,49 +348,60 @@ with socket.create_connection(address=(parse_result.hostname, parse_result.port)
                 # AvatarSelection,
                 matchId = resp["MatchInfo"]["MatchId"]
                 eventId = resp["MatchInfo"]["EventId"]
+                break
 
-assembly_path = MTGA_folder + "/" + r"./MTGA_Data/Managed/"
+# battlefield control
 
-import sys
-sys.path.append(assembly_path)
+import message_pb2
 
-import clr
-clr.AddReference("Wizards.MDN.GreProtobuf.Unity")
-clr.AddReference("Google.Protobuf")
-
-from Wotc.Mtgo.Gre.External.Messaging import MatchServiceToClientMessage
-from Google.Protobuf import CodedInputStream
-
-def read(buffer: bytes, offset: int, length: int) -> dict:
-    stream = CodedInputStream(buffer, offset, length)
-    message = MatchServiceToClientMessage()
-    message.MergeFrom(stream)
-    return json.loads(message.ToString())
-
+import random
+from datetime import datetime
 class ProtoStreamChatter(StreamChatter):
-    def speak(self, message: dict):
-        self.ssock.send(packet_str(json.dumps(message, separators=(',', ':'))))
+    def __init__(self, ssock: ssl.SSLSocket):
+        self.request_id = 0
+        super().__init__(ssock)
 
+    @staticmethod
+    def packet_str(data: bytes) -> bytes:
+        return bytes([3, 1]) + len(data).to_bytes(4, 'little') + data
+        
+    def speak(self, message: message_pb2.ClientToMatchServiceMessage):
+        self.ssock.send(ProtoStreamChatter.packet_str(message.SerializeToString()))
 
-    def proto_inquire(self, ty: int, payload: dict) -> dict:
-        trans_id = str(uuid.uuid1())
-        self.speak({"Type": ty, "TransId": trans_id, "Payload":
-                    json.dumps(payload, separators=(',', ':'))})
-        while self.flag != 'valid':
-            resp = self.check()
-        resp = json.loads(resp.decode())
-        self.flag = ''
-        if resp['TransId'] == trans_id:
-            return resp
-        else:
-            self.reply[(ty, trans_id)] = None
-            self.reply[(resp["Type"], resp["TransId"])] = resp
-            return None
+    def propose(self, ty: message_pb2.ClientToMatchServiceMessageType, payload):
+        self.request_id += 1
+        self.speak(message_pb2.ClientToMatchServiceMessage(
+            requestId=self.request_id,
+            timestamp=int((datetime.utcnow() - datetime(1, 1, 1)).total_seconds() * 10 ** 7),
+            transactionId=str(uuid.uuid1()),
+            clientToMatchServiceMessageType=ty,
+            payload=payload.SerializeToString()
+        ))
+
 
 with socket.create_connection(address=(match_endpoint_host, match_endpoint_port)) as sock:
     with context.wrap_socket(sock, server_hostname=match_endpoint_host) as ssock:
         ssock.do_handshake()
         # GREConnection OnMsgReceived
-        from google.protobuf.internal.decoder import ReadTag, ReadInt32
-        chatter = StreamChatter(ssock)
+        chatter = ProtoStreamChatter(ssock)
+        chatter.propose(
+            message_pb2.ClientToMatchServiceMessageType.ClientToMatchServiceMessageType_AuthenticateRequest,
+            message_pb2.AuthenticateRequest(
+                clientId=persona_id,
+                playFabSessionTicket=access_token,
+                inactivityTimeoutMs=60000,
+                clientInfo=message_pb2.ClientInfo(
+                    clientType=message_pb2.ClientType.ClientType_User,
+                    clientVersion=client_version
+                )
+            )
+        )
         
+        for _ in range(20):
+            time.sleep(1)
+            resp = chatter.check()
+            if 'valid' == chatter.flag:
+                msg = message_pb2.MatchServiceToClientMessage()
+                msg.ParseFromString(resp)
+                print(msg)
+                break
