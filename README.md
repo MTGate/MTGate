@@ -1,6 +1,6 @@
 # MTGate
 
-MTGate is an attempt on [MTGA](https://magic.wizards.com/en/mtgarena) API reverse engineering. For now it is just a Python script, with which I can 
+MTGate is an attempt on [MTGA](https://magic.wizards.com/en/mtgarena) API reverse engineering. For now it is just a single Python script `mtga_simu.py`, with which I can 
 - log in with my credential token loaded from Windows registry,
 - establish a TLS connection with the server and get account information,
 - and begin a "Standard play" pairing with my last used deck.
@@ -16,8 +16,10 @@ As stated above, there are some limitations now.
 [ ] structured code
 [ ] testcases
 
-[x] mock of official client traffic
+[x] mock official client traffic
+[ ] wiretapping official client using `mitmproxy`
 [ ] built-in card play
+[ ] re-connect and custom network route support
 [ ] (T)UI
     - [ ] advanced and customizable information display
     - [ ] REPL
@@ -39,9 +41,15 @@ I came up with this name one sleepless night, along with some other names like "
 
 ## About the design
 
-MTGA is a server-based game, and any cheating comes with a risk. I try to make this script, because MTGA official client has poor support for re-connecting after network errors. This project should mock the network traffic of MTGA client, and make it possible to finish a match without opening the GUI client.
+MTGA is a server-based game, and any cheating comes with a risk (which is therefore not the primary goal). I try to make this script, because MTGA official client has poor support for re-connecting after network errors. This project should mock the network traffic of MTGA client, and make it possible to finish a match without opening the GUI client.
 
-I choose Python to write the script because I feel for its easy grammar and believe in Python's marvelous package ecosystem. Of course the official client is written in C# with Unity support, but after a failure to call MTGA's DLLs from Visual Studio, I gave up the C# idea. Python only fails me once when MTGA's inner gaming system (GRE) proves to be using [Protocol Buffers](https://protobuf.dev/), and I cannot easily deserialize it with Python packages.
+There are many ways to customize the client. Many people have tried to use key deamons (like [this](https://github.com/hornsilk/BreyaBot)) to click inside the client. This does not solve my problem, however, as my problem comes with poor connection and terrible offline detection of MTGA client. The key deamon can not improve the waiting experience.
+
+Injecting the game DLL is also cool, in which way [Dan found a lot of interesting things](https://www.mayer.cool/writings/I-Hacked-Magic-the-Gathering/). I also modified the `Assembly-CSharp.dll` a little bit with dnSpyEx to print the logs, but I don't have the confidence to rewire the whole GUI logic to skip the nonsense by myself.
+
+Starting a separate client from scratch is as flexible as hijacking client network connections. I finally decided to do a minimal customized client, because I only need to deal with the network protocol then. The separate client can be easily transformed to a network hijacker with `mitmproxy`.
+
+I choose Python to write the script because I feel for its easy grammar and believe in Python's marvelous package ecosystem. Of course the official client is written in C# with Unity support, but after a failure to call MTGA's DLLs from Visual Studio, I gave up the C# idea. Python only fails me once when MTGA's inner gaming system (GRE) proves to be using [Protocol Buffers](https://protobuf.dev/), and I cannot easily deserialize it with Python packages. (Update: I found a [hero](https://github.com/riQQ/MtgaProto/blob/master/messages.proto) who release the protobuf file of GRE's protocol)
 
 ## Acknowledgement
 

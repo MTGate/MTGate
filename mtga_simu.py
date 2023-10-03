@@ -163,6 +163,7 @@ class StreamChatter:
         self.flag = ''
         self.reply = {}
         self.ssock = ssock
+        self.some_counter = 0
     
     @staticmethod
     def packet_str(data: str) -> bytes:
@@ -175,8 +176,11 @@ class StreamChatter:
             self.buf += self.ssock.recv()
         except TimeoutError:
             pass
-        # if len(self.buf) == 0: # timeout test
-        #     some_counter += 1
+        if self.some_counter > 6:
+             raise b''
+        if len(self.buf) == 0: # timeout test
+            self.some_counter += 1
+            return b''
         if len(self.buf) < 6:
             raise RuntimeError(self.buf)
         if self.buf[0] == 0x03 and self.buf[1] == 0x02: # ping
@@ -346,15 +350,13 @@ with socket.create_connection(address=(parse_result.hostname, parse_result.port)
                 # OpponentEmotesSelection, OpponentEmotesSelection, OpponentPetSelection,
                 # PetSelection, OpponentSleeveSelection, OpponentAvatarSelection,
                 # AvatarSelection,
-                matchId = resp["MatchInfo"]["MatchId"]
-                eventId = resp["MatchInfo"]["EventId"]
+                match_id = resp["MatchInfo"]["MatchId"]
+                event_id = resp["MatchInfo"]["EventId"]
                 break
 
 # battlefield control
 
-import message_pb2
-
-import random
+import message_pb2 as pb
 from datetime import datetime
 class ProtoStreamChatter(StreamChatter):
     def __init__(self, ssock: ssl.SSLSocket):
@@ -365,12 +367,12 @@ class ProtoStreamChatter(StreamChatter):
     def packet_str(data: bytes) -> bytes:
         return bytes([3, 1]) + len(data).to_bytes(4, 'little') + data
         
-    def speak(self, message: message_pb2.ClientToMatchServiceMessage):
+    def speak(self, message: pb.ClientToMatchServiceMessage):
         self.ssock.send(ProtoStreamChatter.packet_str(message.SerializeToString()))
 
-    def propose(self, ty: message_pb2.ClientToMatchServiceMessageType, payload):
+    def propose(self, ty: pb.ClientToMatchServiceMessageType, payload):
         self.request_id += 1
-        self.speak(message_pb2.ClientToMatchServiceMessage(
+        self.speak(pb.ClientToMatchServiceMessage(
             requestId=self.request_id,
             timestamp=int((datetime.utcnow() - datetime(1, 1, 1)).total_seconds() * 10 ** 7),
             transactionId=str(uuid.uuid1()),
@@ -378,6 +380,144 @@ class ProtoStreamChatter(StreamChatter):
             payload=payload.SerializeToString()
         ))
 
+    def construct_door_connect_request(self) -> pb.ClientToMatchDoorConnectRequest:
+        connect_message = pb.ClientToGREMessage(
+            type=pb.ClientMessageType.ClientMessageType_ConnectReq,
+            systemSeatId=0,
+			connectReq=pb.ConnectReq(
+                grpVersion=pb.Version(
+                    majorVersion=int(client_version.split(".")[0]),
+                    minorVersion=int(client_version.split(".")[1])
+                ),
+				defaultSettings=pb.SettingsMessage(
+                    stops=[
+                        pb.Stop(
+                            stopType=pb.StopType.StopType_UpkeepStep,
+                            appliesTo=pb.SettingScope.SettingScope_Team,
+                            status=pb.SettingStatus.SettingStatus_Clear
+                        ),
+                        pb.Stop(
+                            stopType=pb.StopType.StopType_DrawStep,
+                            appliesTo=pb.SettingScope.SettingScope_Team,
+                            status=pb.SettingStatus.SettingStatus_Clear
+                        ),
+                        pb.Stop(
+                            stopType=pb.StopType.StopType_PrecombatMainPhase,
+                            appliesTo=pb.SettingScope.SettingScope_Team,
+                            status=pb.SettingStatus.SettingStatus_Set
+                        ),
+                        pb.Stop(
+                            stopType=pb.StopType.StopType_BeginCombatStep,
+                            appliesTo=pb.SettingScope.SettingScope_Team,
+                            status=pb.SettingStatus.SettingStatus_Set
+                        ),
+                        pb.Stop(
+                            stopType=pb.StopType.StopType_DeclareAttackersStep,
+                            appliesTo=pb.SettingScope.SettingScope_Team,
+                            status=pb.SettingStatus.SettingStatus_Set
+                        ),
+                        pb.Stop(
+                            stopType=pb.StopType.StopType_DeclareBlockersStep,
+                            appliesTo=pb.SettingScope.SettingScope_Team,
+                            status=pb.SettingStatus.SettingStatus_Set
+                        ),
+                        pb.Stop(
+                            stopType=pb.StopType.StopType_FirstStrikeDamageStep,
+                            appliesTo=pb.SettingScope.SettingScope_Team,
+                            status=pb.SettingStatus.SettingStatus_Set
+                        ),
+                        pb.Stop(
+                            stopType=pb.StopType.StopType_CombatDamageStep,
+                            appliesTo=pb.SettingScope.SettingScope_Team,
+                            status=pb.SettingStatus.SettingStatus_Clear
+                        ),
+                        pb.Stop(
+                            stopType=pb.StopType.StopType_EndCombatStep,
+                            appliesTo=pb.SettingScope.SettingScope_Team,
+                            status=pb.SettingStatus.SettingStatus_Clear
+                        ),
+                        pb.Stop(
+                            stopType=pb.StopType.StopType_PostcombatMainPhase,
+                            appliesTo=pb.SettingScope.SettingScope_Team,
+                            status=pb.SettingStatus.SettingStatus_Set
+                        ),
+                        pb.Stop(
+                            stopType=pb.StopType.StopType_EndStep,
+                            appliesTo=pb.SettingScope.SettingScope_Team,
+                            status=pb.SettingStatus.SettingStatus_Clear
+                        ),
+                        pb.Stop(
+                            stopType=pb.StopType.StopType_UpkeepStep,
+                            appliesTo=pb.SettingScope.SettingScope_Opponents,
+                            status=pb.SettingStatus.SettingStatus_Clear
+                        ),
+                        pb.Stop(
+                            stopType=pb.StopType.StopType_DrawStep,
+                            appliesTo=pb.SettingScope.SettingScope_Opponents,
+                            status=pb.SettingStatus.SettingStatus_Clear
+                        ),
+                        pb.Stop(
+                            stopType=pb.StopType.StopType_PrecombatMainPhase,
+                            appliesTo=pb.SettingScope.SettingScope_Opponents,
+                            status=pb.SettingStatus.SettingStatus_Clear
+                        ),
+                        pb.Stop(
+                            stopType=pb.StopType.StopType_BeginCombatStep,
+                            appliesTo=pb.SettingScope.SettingScope_Opponents,
+                            status=pb.SettingStatus.SettingStatus_Set
+                        ),
+                        pb.Stop(
+                            stopType=pb.StopType.StopType_DeclareAttackersStep,
+                            appliesTo=pb.SettingScope.SettingScope_Opponents,
+                            status=pb.SettingStatus.SettingStatus_Set
+                        ),
+                        pb.Stop(
+                            stopType=pb.StopType.StopType_DeclareBlockersStep,
+                            appliesTo=pb.SettingScope.SettingScope_Opponents,
+                            status=pb.SettingStatus.SettingStatus_Set
+                        ),
+                        pb.Stop(
+                            stopType=pb.StopType.StopType_FirstStrikeDamageStep,
+                            appliesTo=pb.SettingScope.SettingScope_Opponents,
+                            status=pb.SettingStatus.SettingStatus_Set
+                        ),
+                        pb.Stop(
+                            stopType=pb.StopType.StopType_CombatDamageStep,
+                            appliesTo=pb.SettingScope.SettingScope_Opponents,
+                            status=pb.SettingStatus.SettingStatus_Clear
+                        ),
+                        pb.Stop(
+                            stopType=pb.StopType.StopType_EndCombatStep,
+                            appliesTo=pb.SettingScope.SettingScope_Opponents,
+                            status=pb.SettingStatus.SettingStatus_Clear
+                        ),
+                        pb.Stop(
+                            stopType=pb.StopType.StopType_PostcombatMainPhase,
+                            appliesTo=pb.SettingScope.SettingScope_Opponents,
+                            status=pb.SettingStatus.SettingStatus_Clear
+                        ),
+                        pb.Stop(
+                            stopType=pb.StopType.StopType_EndStep,
+                            appliesTo=pb.SettingScope.SettingScope_Opponents,
+                            status=pb.SettingStatus.SettingStatus_Set
+                        ),
+                    ],
+                    autoPassOption=pb.AutoPassOption.AutoPassOption_ResolveMyStackEffects,
+                    graveyardOrder=pb.OrderingType.OrderingType_OrderArbitraryAlways,
+                    manaSelectionType=pb.ManaSelectionType.ManaSelectionType_Auto,
+                    defaultAutoPassOption=pb.AutoPassOption.AutoPassOption_ResolveMyStackEffects,
+                    smartStopsSetting=pb.SmartStopsSetting.SmartStopsSetting_Enable,
+                    autoTapStopsSetting=pb.AutoTapStopsSetting.AutoTapStopsSetting_Enable,
+                    autoOptionalPaymentCancellationSetting=pb.Setting.Setting_Enable
+                ),
+				protoVer=max(pb.ProtoVersion.values())
+            )
+        )
+        return pb.ClientToMatchDoorConnectRequest(
+            matchId=match_id,
+            mcFabricUri=controller_fabric_uri,
+            clientToGreMessageBytes=connect_message.SerializeToString(),
+        )
 
 with socket.create_connection(address=(match_endpoint_host, match_endpoint_port)) as sock:
     with context.wrap_socket(sock, server_hostname=match_endpoint_host) as ssock:
@@ -385,13 +525,13 @@ with socket.create_connection(address=(match_endpoint_host, match_endpoint_port)
         # GREConnection OnMsgReceived
         chatter = ProtoStreamChatter(ssock)
         chatter.propose(
-            message_pb2.ClientToMatchServiceMessageType.ClientToMatchServiceMessageType_AuthenticateRequest,
-            message_pb2.AuthenticateRequest(
+            pb.ClientToMatchServiceMessageType.ClientToMatchServiceMessageType_AuthenticateRequest,
+            pb.AuthenticateRequest(
                 clientId=persona_id,
                 playFabSessionTicket=access_token,
                 inactivityTimeoutMs=60000,
-                clientInfo=message_pb2.ClientInfo(
-                    clientType=message_pb2.ClientType.ClientType_User,
+                clientInfo=pb.ClientInfo(
+                    clientType=pb.ClientType.ClientType_User,
                     clientVersion=client_version
                 )
             )
@@ -401,7 +541,35 @@ with socket.create_connection(address=(match_endpoint_host, match_endpoint_port)
             time.sleep(1)
             resp = chatter.check()
             if 'valid' == chatter.flag:
-                msg = message_pb2.MatchServiceToClientMessage()
+                msg = pb.MatchServiceToClientMessage()
                 msg.ParseFromString(resp)
                 print(msg)
+                chatter.flag = ''
                 break
+        
+        chatter.propose(
+            pb.ClientToMatchServiceMessageType.ClientToMatchServiceMessageType_ClientToMatchDoorConnectRequest,
+            chatter.construct_door_connect_request()
+        )
+
+        for _ in range(20):
+            time.sleep(1)
+            resp = chatter.check()
+            if 'valid' == chatter.flag:
+                msg = pb.MatchServiceToClientMessage()
+                msg.ParseFromString(resp)
+                print(msg)
+                chatter.flag = ''
+                break
+
+        for _ in range(20):
+            time.sleep(1)
+            resp = chatter.check()
+            if 'valid' == chatter.flag:
+                msg = pb.MatchServiceToClientMessage()
+                msg.ParseFromString(resp)
+                print(msg)
+                chatter.flag = ''
+                break
+
+        
