@@ -366,19 +366,33 @@ class ProtoStreamChatter(StreamChatter):
     @staticmethod
     def packet_str(data: bytes) -> bytes:
         return bytes([3, 1]) + len(data).to_bytes(4, 'little') + data
-        
+    
+    # send the req with protobuf serialization
     def speak(self, message: pb.ClientToMatchServiceMessage):
         self.ssock.send(ProtoStreamChatter.packet_str(message.SerializeToString()))
 
-    def propose(self, ty: pb.ClientToMatchServiceMessageType, payload):
+    # send the payload, auto appending the transaction ID, request ID, timestamp
+    def propose(self, ty: pb.ClientToMatchServiceMessageType, payload) -> str:
         self.request_id += 1
+        trans_id = str(uuid.uuid1())
         self.speak(pb.ClientToMatchServiceMessage(
             requestId=self.request_id,
             timestamp=int((datetime.utcnow() - datetime(1, 1, 1)).total_seconds() * 10 ** 7),
-            transactionId=str(uuid.uuid1()),
+            transactionId=trans_id,
             clientToMatchServiceMessageType=ty,
             payload=payload.SerializeToString()
         ))
+        self.reply[trans_id] = []
+        return trans_id
+    
+    # get the resp
+    def admit(self):
+        resp = self.check()
+        if 'valid' == self.flag:
+            msg = pb.MatchServiceToClientMessage()
+            msg.ParseFromString(resp)
+            self.flag = ''
+            self.reply[msg.transactionId] += msg
 
     def construct_door_connect_request(self) -> pb.ClientToMatchDoorConnectRequest:
         connect_message = pb.ClientToGREMessage(
@@ -524,7 +538,7 @@ with socket.create_connection(address=(match_endpoint_host, match_endpoint_port)
         ssock.do_handshake()
         # GREConnection OnMsgReceived
         chatter = ProtoStreamChatter(ssock)
-        chatter.propose(
+        trans_id = chatter.propose(
             pb.ClientToMatchServiceMessageType.ClientToMatchServiceMessageType_AuthenticateRequest,
             pb.AuthenticateRequest(
                 clientId=persona_id,
@@ -539,17 +553,50 @@ with socket.create_connection(address=(match_endpoint_host, match_endpoint_port)
         
         for _ in range(20):
             time.sleep(1)
-            resp = chatter.check()
-            if 'valid' == chatter.flag:
-                msg = pb.MatchServiceToClientMessage()
-                msg.ParseFromString(resp)
-                print(msg)
-                chatter.flag = ''
+            chatter.admit()
+            if chatter.reply[trans_id]:
+                print("Duel access authenticated!")
                 break
         
-        chatter.propose(
+        trans_id = chatter.propose(
             pb.ClientToMatchServiceMessageType.ClientToMatchServiceMessageType_ClientToMatchDoorConnectRequest,
             chatter.construct_door_connect_request()
+        )
+
+        counter = 0
+        for _ in range(20):
+            time.sleep(1)
+            chatter.admit()
+            if chatter.reply[trans_id]:
+                counter += 1
+                print("Room state updated!")
+                if counter >= 2:
+                    break
+        assert len(chatter.reply[trans_id]) == 2
+        for msg in chatter.reply[trans_id]:
+            if hasattr(msg, "matchGameRoomStateChangedEvent"):
+                room_info = msg.matchGameRoomStateChangedEvent.gameRoomInfo
+            if hasattr(msg, "greToClientEvent"):
+                client_msgs = msg.greToClientEvent.greToClientMessages
+        choose_starting_req = next(msg for msg in client_msgs if msg.type == pb.GREMessageType.GREMessageType_ChooseStartingPlayerReq)
+        
+        # TODO: game manager init
+        game_manager = {}
+
+        if 
+        #auto choose play
+        trans_id = chatter.propose(
+            pb.ClientToMatchServiceMessageType.ClientToMatchServiceMessageType_ClientToGREMessage,
+            pb.ClientToGREMessage(
+                type=pb.ClientMessageType.ClientMessageType_ChooseStartingPlayerResp,
+                gameStateId=choose_starting_req.gameStateId,
+                respId=choose_starting_req.msgId,
+                chooseStartingPlayerResp=pb.ChooseStartingPlayerResp(
+                    teamType=choose_starting_req.chooseStartingPlayerReq.teamType,
+                    systemSeatId=game_manager["local_player_id"],
+                    teamId=game_manager["local_player_id"],
+                )
+            )
         )
 
         for _ in range(20):
@@ -559,16 +606,19 @@ with socket.create_connection(address=(match_endpoint_host, match_endpoint_port)
                 msg = pb.MatchServiceToClientMessage()
                 msg.ParseFromString(resp)
                 print(msg)
-                chatter.flag = ''
-                break
-
-        for _ in range(20):
-            time.sleep(1)
-            resp = chatter.check()
-            if 'valid' == chatter.flag:
-                msg = pb.MatchServiceToClientMessage()
-                msg.ParseFromString(resp)
-                print(msg)
+                if hasattr(msg, "matchGameRoomStateChangedEvent"):
+                    room_info = msg.matchGameRoomStateChangedEvent.gameRoomInfo
+                if hasattr(msg, "greToClientEvent"):
+                    for item in msg.greToClientEvent.greToClientMessages:
+                        match item.type:
+                            case pb.GREMessageType.GREMessageType_ConnectResp:
+                                conn_resp = item.connectResp
+                            case pb.GREMessageType.GREMessageType_GameStateMessage:
+                                game_state = item.GameStateMessage
+                            case pb.GREMessageType.GREMessageType_DieRollResultsResp:
+                                die_roll = item.DieRollResultsResp
+                            case pb.GREMessageType.GREMessageType_ChooseStartingPlayerReq:
+                                item.chooseStartingPlayerReq
                 chatter.flag = ''
                 break
 
