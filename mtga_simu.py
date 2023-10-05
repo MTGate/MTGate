@@ -386,13 +386,17 @@ class ProtoStreamChatter(StreamChatter):
         return trans_id
     
     # get the resp
-    def admit(self):
+    def admit(self) -> str | None:
         resp = self.check()
         if 'valid' == self.flag:
             msg = pb.MatchServiceToClientMessage()
             msg.ParseFromString(resp)
             self.flag = ''
-            self.reply[msg.transactionId] += msg
+            if msg.transactionId in self.reply:
+                self.reply[msg.transactionId] += [msg]
+            else:
+                self.reply[msg.transactionId] = [msg]
+                return msg.transactionId
 
     def construct_door_connect_request(self) -> pb.ClientToMatchDoorConnectRequest:
         connect_message = pb.ClientToGREMessage(
@@ -532,7 +536,21 @@ class ProtoStreamChatter(StreamChatter):
             mcFabricUri=controller_fabric_uri,
             clientToGreMessageBytes=connect_message.SerializeToString(),
         )
-
+    
+    def get_gre_client_messages(self, trans_id=None):
+        for _ in range(20):
+            time.sleep(1)
+            if trans_id:
+                chatter.admit()
+            else:
+                trans_id = chatter.admit()
+            if trans_id and chatter.reply[trans_id]:
+                break
+        
+        return [msg
+            for trans in chatter.reply[trans_id] if hasattr(trans, 'greToClientEvent')
+            for msg in trans.greToClientEvent.greToClientMessages]
+        
 with socket.create_connection(address=(match_endpoint_host, match_endpoint_port)) as sock:
     with context.wrap_socket(sock, server_hostname=match_endpoint_host) as ssock:
         ssock.do_handshake()
@@ -573,53 +591,78 @@ with socket.create_connection(address=(match_endpoint_host, match_endpoint_port)
                 if counter >= 2:
                     break
         assert len(chatter.reply[trans_id]) == 2
+        choose_starting_req = None
         for msg in chatter.reply[trans_id]:
             if hasattr(msg, "matchGameRoomStateChangedEvent"):
                 room_info = msg.matchGameRoomStateChangedEvent.gameRoomInfo
             if hasattr(msg, "greToClientEvent"):
                 client_msgs = msg.greToClientEvent.greToClientMessages
-        choose_starting_req = next(msg for msg in client_msgs if msg.type == pb.GREMessageType.GREMessageType_ChooseStartingPlayerReq)
+        for item in client_msgs:
+            match item.type:
+                case pb.GREMessageType.GREMessageType_ConnectResp:
+                    conn_resp = item.connectResp
+                case pb.GREMessageType.GREMessageType_GameStateMessage:
+                    game_state = item.gameStateMessage
+                case pb.GREMessageType.GREMessageType_DieRollResultsResp:
+                    die_roll = item.dieRollResultsResp
+                case pb.GREMessageType.GREMessageType_ChooseStartingPlayerReq:
+                    choose_starting_req = item
         
         # TODO: game manager init
+        # MatchManager -> private void OnMessageReceived(GREToClientMessage msg)
         game_manager = {}
+        for item in client_msgs:
+            if len(item.systemSeatIds) == 1:
+                game_manager["local_player_id"] = item.systemSeatIds[0]
+        game_manager["win_condition"] = game_state.gameInfo.matchWinCondition
+        game_manager["game_results"] = game_state.gameInfo.results
+        game_manager["format"] = game_state.gameInfo.superFormat
+        game_manager["variant"] = game_state.gameInfo.variant
+        game_manager["current_game_number"] = game_state.gameInfo.gameNumber
 
-        if 
-        #auto choose play
+        # DieRollResultStateAnnotationParser
+        # ChooseStartingPlayerWorkflow 
+        if choose_starting_req:
+            #auto choose play
+            trans_id = chatter.propose(
+                pb.ClientToMatchServiceMessageType.ClientToMatchServiceMessageType_ClientToGREMessage,
+                pb.ClientToGREMessage(
+                    type=pb.ClientMessageType.ClientMessageType_ChooseStartingPlayerResp,
+                    gameStateId=choose_starting_req.gameStateId,
+                    respId=choose_starting_req.msgId,
+                    chooseStartingPlayerResp=pb.ChooseStartingPlayerResp(
+                        teamType=choose_starting_req.chooseStartingPlayerReq.teamType,
+                        systemSeatId=game_manager["local_player_id"],
+                        teamId=game_manager["local_player_id"],
+                    )
+                )
+            )
+
+            gre_msgs = chatter.get_gre_client_messages(trans_id)
+            print("Room state updated after your choosing hand!")
+            
+        else:
+            gre_msgs = chatter.get_gre_client_messages()
+            print("Room state updated after opponent's choosing hand!")
+
+        mulligan_msg = next(msg for msg in gre_msgs if msg.type == pb.GREMessageType.GREMessageType_MulliganReq)
+        while not mulligan_msg:
+            gre_msgs = chatter.get_gre_client_messages()
+            mulligan_msg = next(msg for msg in gre_msgs if msg.type == pb.GREMessageType.GREMessageType_MulliganReq)
+
+        # no-mulligan for now
         trans_id = chatter.propose(
             pb.ClientToMatchServiceMessageType.ClientToMatchServiceMessageType_ClientToGREMessage,
             pb.ClientToGREMessage(
-                type=pb.ClientMessageType.ClientMessageType_ChooseStartingPlayerResp,
-                gameStateId=choose_starting_req.gameStateId,
-                respId=choose_starting_req.msgId,
-                chooseStartingPlayerResp=pb.ChooseStartingPlayerResp(
-                    teamType=choose_starting_req.chooseStartingPlayerReq.teamType,
-                    systemSeatId=game_manager["local_player_id"],
-                    teamId=game_manager["local_player_id"],
+                type=pb.ClientMessageType.ClientMessageType_MulliganResp,
+                gameStateId=mulligan_msg.gameStateId,
+                respId=mulligan_msg.msgId,
+                mulliganResp=pb.MulliganResp(
+                    decision=pb.MulliganOption.MulliganOption_AcceptHand
                 )
             )
         )
 
-        for _ in range(20):
-            time.sleep(1)
-            resp = chatter.check()
-            if 'valid' == chatter.flag:
-                msg = pb.MatchServiceToClientMessage()
-                msg.ParseFromString(resp)
-                print(msg)
-                if hasattr(msg, "matchGameRoomStateChangedEvent"):
-                    room_info = msg.matchGameRoomStateChangedEvent.gameRoomInfo
-                if hasattr(msg, "greToClientEvent"):
-                    for item in msg.greToClientEvent.greToClientMessages:
-                        match item.type:
-                            case pb.GREMessageType.GREMessageType_ConnectResp:
-                                conn_resp = item.connectResp
-                            case pb.GREMessageType.GREMessageType_GameStateMessage:
-                                game_state = item.GameStateMessage
-                            case pb.GREMessageType.GREMessageType_DieRollResultsResp:
-                                die_roll = item.DieRollResultsResp
-                            case pb.GREMessageType.GREMessageType_ChooseStartingPlayerReq:
-                                item.chooseStartingPlayerReq
-                chatter.flag = ''
-                break
-
-        
+        gre_msgs = chatter.get_gre_client_messages(trans_id)
+        print("No mulligan in default.")
+        print(gre_msgs)
