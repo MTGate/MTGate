@@ -156,6 +156,8 @@ context.load_verify_locations('./cert.pem')
 from urllib.parse import urlparse
 parse_result = urlparse(fdUri)
 
+# panel control
+
 ######tcpConnnection		private void ProcessRead(IAsyncResult ar)
 class StreamChatter:
     def __init__(self, ssock: ssl.SSLSocket):
@@ -243,6 +245,7 @@ with socket.create_connection(address=(parse_result.hostname, parse_result.port)
         })
         if not resp == None and "Payload" in resp:
             session_id = json.loads(resp['Payload'])["SessionId"]
+            print("Client panel authenticated.")
 
         import gzip
         def decompress(content: str) -> dict:
@@ -265,11 +268,32 @@ with socket.create_connection(address=(parse_result.hostname, parse_result.port)
             for event_deck in json.loads(json.loads(resp["Payload"])["Preferences"]["RecentGamesData"]):
                 if event_deck["EventName"] == "Play":
                     play_deck_id = event_deck["DeckId"]
+                    print("Latest used event deck acquired!")
                   # TODO: what is LTP_xxxxx
 
         if play_deck_id == None:
             raise "111"
+        
+        resp = chatter.inquire(1000, {})  # getQuests
+        quest_msg = None
+        if not resp == None and "Payload" in resp:
+            quest_msg = json.loads(resp["Payload"])
+            for quest in quest_msg["quests"]:
+                print(quest["questId"])
+                print(quest["canSwap"])
+                print(quest["chestDescription"]["quantity"])
+                # TODO:
+                # if quest["canSwap"]:
+                #     resp = chatter.inquire(1001, {"QuestId": quest["questId"]})  # swapQuests
+                    # break
 
+        # resp = chatter.inquire(1200, {})  # PeriodicRewards_GetStatus
+        # quest_status_msg = None
+        # if not resp == None and "Payload" in resp:
+        #     quest_status_msg = json.loads(resp["Payload"])
+        # resp = chatter.inquire(624, {"CacheVersion":0, "ShowAllEvents": False})  # Event_GetActiveEventsV2
+            
+            
         resp = chatter.inquire(400, { # getDeck (body)
             "DeckId": play_deck_id
         })
@@ -289,6 +313,7 @@ with socket.create_connection(address=(parse_result.hostname, parse_result.port)
                 for summary in deck_summaries:
                     if summary["DeckId"] == play_deck_id:
                         play_deck_summary = summary
+                print("Other information acquired!")
 
 		# AwsEventServiceWrapper.SubmitEventDeck -> toAwsModel
         def toAwsModel(deck_body: dict, deck_summary: dict) -> (dict, dict):
@@ -326,10 +351,14 @@ with socket.create_connection(address=(parse_result.hostname, parse_result.port)
 
         assert "Payload" in resp1 and "Payload" in resp2
 
+        # matchmaking -> OnMatchCreated
+        #TODO: maybe the reason of not acc quest
+
         resp = chatter.inquire(603, {  # EnterPairing
             "EventName": "Play",
             "EventCode": None,
         })
+        print("Entering pairing!")
         print(resp)
 
         import time
@@ -352,6 +381,7 @@ with socket.create_connection(address=(parse_result.hostname, parse_result.port)
                 # AvatarSelection,
                 match_id = resp["MatchInfo"]["MatchId"]
                 event_id = resp["MatchInfo"]["EventId"]
+                print("Match created!")
                 break
 
 # battlefield control
@@ -645,12 +675,13 @@ with socket.create_connection(address=(match_endpoint_host, match_endpoint_port)
             gre_msgs = chatter.get_gre_client_messages()
             print("Room state updated after opponent's choosing hand!")
 
-        mulligan_msg = next(msg for msg in gre_msgs if msg.type == pb.GREMessageType.GREMessageType_MulliganReq)
+        mulligan_msg = [msg for msg in gre_msgs if msg.type == pb.GREMessageType.GREMessageType_MulliganReq]
         while not mulligan_msg:
             gre_msgs = chatter.get_gre_client_messages()
-            mulligan_msg = next(msg for msg in gre_msgs if msg.type == pb.GREMessageType.GREMessageType_MulliganReq)
+            mulligan_msg = [msg for msg in gre_msgs if msg.type == pb.GREMessageType.GREMessageType_MulliganReq]
+        mulligan_msg = mulligan_msg[0]
 
-        # no-mulligan for now
+        # no change hands for now
         trans_id = chatter.propose(
             pb.ClientToMatchServiceMessageType.ClientToMatchServiceMessageType_ClientToGREMessage,
             pb.ClientToGREMessage(
@@ -664,5 +695,75 @@ with socket.create_connection(address=(match_endpoint_host, match_endpoint_port)
         )
 
         gre_msgs = chatter.get_gre_client_messages(trans_id)
-        print("No mulligan in default.")
-        print(gre_msgs)
+        print("keep all in default.")
+        
+        # Wotc.Mtga.DuelScene.Interactions.ActionsAvailable.Highlighting
+        def highlighted_move(action: pb.Action) -> bool:
+            if action == None:
+                return False
+            # not affordable
+            if not ((action.actionType == pb.ActionType.ActionType_Play or action.actionType == pb.ActionType.ActionType_PlayMDFC) or \
+                    (len(action.autoTapSolution.autoTapActions) > 0) or \
+                    (all([pb.ManaColor.ManaColor_Phyrexian in requirement.color or
+                            pb.ManaColor.ManaColor_X in requirement.color
+                            for requirement in action.manaCost]))):
+                return False
+            if action.abilityGrpId == 75081 and action.highlight == pb.HighlightType.HighlightType_Cold and \
+                action.actionType == pb.ActionType.ActionType_Activate:
+                return False
+            if action.highlight == pb.HighlightType.HighlightType_Hot:
+                return True
+            # shouldn't play, temp unavailable
+            # if action.abilityGrpId != 0 and instance.PlayWarnings.Exists((ShouldntPlayData x) => x.AbilityId == action.AbilityGrpId):
+            #     return False
+            return True
+
+        #  AI_strategy see C# class RandomStrategy() and peers
+        class MtgaBot:
+            def __init__(self):
+                self.state = {}
+                pass
+            def handle_request(
+                      self,
+                      req: pb.ActionsAvailableReq,
+                      new_state: pb.GameStateMessage | None = None,
+                ) -> pb.PerformActionResp | None:
+                if new_state:
+                    self.update_state(new_state)
+                for action in req.actions:
+                    if highlighted_move(action):
+                        return pb.PerformActionResp(
+                            autoPassPriority=pb.AutoPassPriority.AutoPassPriority_Yes,
+                            actions=[action]
+                        )
+                # if can_pass ...
+
+            def update_state(self, new_state):
+                pass
+
+        bot = MtgaBot()
+        for _ in range(10):
+            gre_msgs = chatter.get_gre_client_messages()
+            print(gre_msgs)
+            action_msgs = [msg
+                           for msg in gre_msgs
+                           if msg.type == pb.GREMessageType.GREMessageType_ActionsAvailableReq]
+            attack_msgs = [msg
+                           for msg in gre_msgs
+                           if msg.type == pb.GREMessageType.GREMessageType_DeclareAttackersReq]
+            # TODO: ClientMessageType_SubmitAttackersReq
+            for msg in action_msgs:
+                print(msg)
+            for action_msg in action_msgs:
+                if act := bot.handle_request(action_msg.actionsAvailableReq):
+                    print(act)
+                    trans_id = chatter.propose(
+                        pb.ClientToMatchServiceMessageType.ClientToMatchServiceMessageType_ClientToGREMessage,
+                        pb.ClientToGREMessage(
+                            type=pb.ClientMessageType.ClientMessageType_PerformActionResp,
+                            gameStateId=action_msg.gameStateId,
+                            respId=action_msg.msgId,
+                            performActionResp=act
+                        )
+                    )
+                    break
