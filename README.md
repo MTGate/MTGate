@@ -10,8 +10,6 @@ As stated above, there are some limitations now.
 - There should be a recently used account that has created a "remember me" token in the registry, while the username and password (full login) need middle tweaks.
 - There should be a recently used deck in the "Standard Play" mode, while other constructed formats and decks need minor tweaks and other limited formats large tweaks.
 - The script provides little interaction so far, and advances to pairing directly. The actual card play part is still worked on.
-- The match created will not accumulate the daily quest/win progress, even
-if played later in the official client.
 
 ## TODOs
 
@@ -33,7 +31,7 @@ if played later in the official client.
 
 ## Current progress
 
-I am inspecting on how to make my match contribute to daily quest/win progress currently.
+I'm going to promote the auto play feature for some time.
 
 ## About the name
 

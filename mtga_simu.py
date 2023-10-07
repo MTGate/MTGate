@@ -363,9 +363,6 @@ with socket.create_connection(address=(parse_result.hostname, parse_result.port)
         print(resp2)
         assert "Payload" in resp1 and "Payload" in resp2
 
-        # matchmaking -> OnMatchCreated
-        #TODO: maybe the reason of not acc quest
-
         resp = chatter.inquire(603, {  # EnterPairing
             "EventName": "Play",
             "EventCode": None,
