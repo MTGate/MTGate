@@ -9,7 +9,9 @@ As stated above, there are some limitations now.
 - It only applies to Windows "directly installed" version of MTGA (to acquire tokens and DLLs), while the Steam and Epic versions need little tweaks.
 - There should be a recently used account that has created a "remember me" token in the registry, while the username and password (full login) need middle tweaks.
 - There should be a recently used deck in the "Standard Play" mode, while other constructed formats and decks need minor tweaks and other limited formats large tweaks.
-- The script provides no interaction so far, and advances to pairing directly. The actual card play part is still worked on.
+- The script provides little interaction so far, and advances to pairing directly. The actual card play part is still worked on.
+- The match created will not accumulate the daily quest/win progress, even
+if played later in the official client. (I am inspecting on that currently.)
 
 ## TODOs
 
