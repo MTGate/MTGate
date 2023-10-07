@@ -280,10 +280,10 @@ with socket.create_connection(address=(parse_result.hostname, parse_result.port)
             quest_msg = json.loads(resp["Payload"])
             for quest in quest_msg["quests"]:
                 print(quest["questId"])
-                print(quest["canSwap"])
+                # print(quest["canSwap"])
                 print(quest["chestDescription"]["quantity"])
                 # TODO:
-                # if quest["canSwap"]:
+                # if "canSwap" in quest:
                 #     resp = chatter.inquire(1001, {"QuestId": quest["questId"]})  # swapQuests
                     # break
 
@@ -313,7 +313,7 @@ with socket.create_connection(address=(parse_result.hostname, parse_result.port)
                 for summary in deck_summaries:
                     if summary["DeckId"] == play_deck_id:
                         play_deck_summary = summary
-                print("Other information acquired!")
+                print("Extra information acquired!")
 
 		# AwsEventServiceWrapper.SubmitEventDeck -> toAwsModel
         def toAwsModel(deck_body: dict, deck_summary: dict) -> (dict, dict):
@@ -335,20 +335,32 @@ with socket.create_connection(address=(parse_result.hostname, parse_result.port)
             deck = deck_body
             deck["DoPreferReducedSideboard"] = False
             return deck, summary
-        
-        aws_deck, aws_summary = toAwsModel(play_deck_body, play_deck_summary)
-        resp1 = chatter.inquire(622, {  # getPlayerPreferences
+
+        chatter.inquire(601, {  # Event_Drop
             "EventName": "Play",
-			"Summary": aws_summary,
-			"Deck": aws_deck
-        })
-        
-        resp2 = chatter.inquire(623, {  # getCourse
-            "EventName": "Play",
-			"Summary": aws_summary,
-			"Deck": aws_deck
         })
 
+        # frontdoorconnectionAWS -> joinEvent
+        resp1 = chatter.inquire(600, {  # Event_Join
+            "EventName": "Play",
+            "EntryCurrencyType": "None",
+            "EntryCurrencyPaid": 0,
+            "CustomTokenId": None
+        })
+        print("Joining event 'standard play'.")
+        
+        aws_deck, aws_summary = toAwsModel(play_deck_body, play_deck_summary)
+        resp2 = chatter.inquire(622, {  # Event_SetDeckV2
+            "EventName": "Play",
+			"Summary": aws_summary,
+			"Deck": aws_deck
+        })
+        
+        # chatter.inquire(623, {  # getCourse
+        # })
+
+        print(resp1)
+        print(resp2)
         assert "Payload" in resp1 and "Payload" in resp2
 
         # matchmaking -> OnMatchCreated
