@@ -181,13 +181,12 @@ for pack in packets:
             c2s.ParseFromString(pack.content[6: (length + 6)])
             for key, val in message_pb2.ClientToMatchServiceMessageType.items():
                 if val == c2s.clientToMatchServiceMessageType:
-                    name = key.lstrip("ClientToMatchServiceMessageType_")
-            if name == 'DoorConnectRequest':
-                name = 'ClientToMatchDoorConnectRequest'
-            if name == 'GREMessage':
+                    # .lstrip("ClientToMatchServiceMessageType_") will cause
+                    # ClientToMatchServiceMessageType_ClientToGREUIMessage become
+                    # GREUIMessage
+                    name = key.removeprefix("ClientToMatchServiceMessageType_")
+            if name == 'ClientToGREUIMessage':
                 name = 'ClientToGREMessage'
-            if name == 'GREUIMessage':
-                name = 'UIMessage'
             c2s_msg_cls = getattr(message_pb2, name)
             c2s_msg = c2s_msg_cls()
             print(name)
