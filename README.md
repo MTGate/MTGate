@@ -11,7 +11,7 @@ As stated above, there are some limitations now.
 - There should be a recently used deck in the "Standard Play" mode, while other constructed formats and decks need minor tweaks and other limited formats large tweaks.
 - The script provides little interaction so far, and advances to pairing directly. The actual card play part is still worked on.
 - The match created will not accumulate the daily quest/win progress, even
-if played later in the official client. (I am inspecting on that currently.)
+if played later in the official client.
 
 ## TODOs
 
@@ -33,7 +33,7 @@ if played later in the official client. (I am inspecting on that currently.)
 
 ## Current progress
 
-I'm trying to understand card play APIs. I'm using official DLLs to decode the traffic, and see if I can know the game state and play a card with only scripts.
+I am inspecting on how to make my match contribute to daily quest/win progress currently.
 
 ## About the name
 
