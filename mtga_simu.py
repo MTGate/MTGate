@@ -359,9 +359,11 @@ with socket.create_connection(address=(parse_result.hostname, parse_result.port)
         # chatter.inquire(623, {  # getCourse
         # })
 
-        print(resp1)
-        print(resp2)
-        assert "Payload" in resp1 and "Payload" in resp2
+        if not ("Payload" in resp1 and "Payload" in resp2):
+            print(resp1)
+            print(resp2)
+            raise Exception(b'')
+        #assert "Payload" in resp1 and "Payload" in resp2
 
         resp = chatter.inquire(603, {  # EnterPairing
             "EventName": "Play",
@@ -728,6 +730,8 @@ with socket.create_connection(address=(match_endpoint_host, match_endpoint_port)
             return True
 
         #  AI_strategy see C# class RandomStrategy() and peers
+        from alterego import respond
+
         class MtgaBot:
             def __init__(self):
                 self.state = {}
@@ -750,10 +754,13 @@ with socket.create_connection(address=(match_endpoint_host, match_endpoint_port)
             def update_state(self, new_state):
                 pass
 
+            def clr_respond(self, msg):
+                return respond(msg)
+
         bot = MtgaBot()
-        for _ in range(10):
+        for _ in range(40):
             gre_msgs = chatter.get_gre_client_messages()
-            print(gre_msgs)
+            # print(gre_msgs)
             action_msgs = [msg
                            for msg in gre_msgs
                            if msg.type == pb.GREMessageType.GREMessageType_ActionsAvailableReq]
@@ -763,8 +770,22 @@ with socket.create_connection(address=(match_endpoint_host, match_endpoint_port)
             # TODO: ClientMessageType_SubmitAttackersReq
             for msg in action_msgs:
                 print(msg)
+            else:
+                print("No actions for now!")
             for action_msg in action_msgs:
-                if act := bot.handle_request(action_msg.actionsAvailableReq):
+                # if act := bot.handle_request(action_msg.actionsAvailableReq):
+                #     print(act)
+                #     trans_id = chatter.propose(
+                #         pb.ClientToMatchServiceMessageType.ClientToMatchServiceMessageType_ClientToGREMessage,
+                #         pb.ClientToGREMessage(
+                #             type=pb.ClientMessageType.ClientMessageType_PerformActionResp,
+                #             gameStateId=action_msg.gameStateId,
+                #             respId=action_msg.msgId,
+                #             performActionResp=act
+                #         )
+                #     )
+                #     break
+                if act := bot.clr_respond(action_msg):
                     print(act)
                     trans_id = chatter.propose(
                         pb.ClientToMatchServiceMessageType.ClientToMatchServiceMessageType_ClientToGREMessage,
@@ -772,7 +793,7 @@ with socket.create_connection(address=(match_endpoint_host, match_endpoint_port)
                             type=pb.ClientMessageType.ClientMessageType_PerformActionResp,
                             gameStateId=action_msg.gameStateId,
                             respId=action_msg.msgId,
-                            performActionResp=act
+                            performActionResp=act.performActionResp
                         )
                     )
                     break
