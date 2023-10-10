@@ -767,12 +767,21 @@ with socket.create_connection(address=(match_endpoint_host, match_endpoint_port)
             attack_msgs = [msg
                            for msg in gre_msgs
                            if msg.type == pb.GREMessageType.GREMessageType_DeclareAttackersReq]
+            req_msgs = [msg
+                        for msg in gre_msgs
+                        if msg.type in [pb.GREMessageType.GREMessageType_ActionsAvailableReq,
+                                        pb.GREMessageType.GREMessageType_SelectTargetsReq,
+                                        pb.GREMessageType.GREMessageType_DeclareAttackersReq,
+                                        pb.GREMessageType.GREMessageType_SelectNReq,
+                                        pb.GREMessageType.GREMessageType_DeclareBlockersReq,
+                                        ]
+            ]
             # TODO: ClientMessageType_SubmitAttackersReq
-            for msg in action_msgs:
+            for msg in req_msgs:
                 print(msg)
             else:
                 print("No actions for now!")
-            for action_msg in action_msgs:
+            for action_msg in req_msgs:
                 # if act := bot.handle_request(action_msg.actionsAvailableReq):
                 #     print(act)
                 #     trans_id = chatter.propose(
@@ -797,3 +806,5 @@ with socket.create_connection(address=(match_endpoint_host, match_endpoint_port)
                         )
                     )
                     break
+
+                # private void SetupBattlefield(GREToClientMessage connectMessage)
