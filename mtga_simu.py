@@ -2,8 +2,24 @@ import requests
 import json
 import winreg
 
-client_version = "2023.29.10"
 MTGA_folder = ".."
+
+assembly_path = MTGA_folder + r"/MTGA_Data/Managed/"
+
+import sys
+sys.path.append(assembly_path)
+
+import clr
+clr.AddReference("Wizards.Mtga.Metadata")
+clr.AddReference("Assembly-CSharp")
+
+from Wizards.Mtga import Metadata, Global
+
+client_version = "2023.30.0"
+# buildNumber = Metadata.ContentVersionBuildPart
+# sourceVersion = Metadata.SourceVersion
+# buildInfo = Metadata.BuildInfo
+full_client_version = "2023.30.0.4683"
 
 def get_reg_val(winreg_modifier: int, loc: str, name: str) -> str:
 	import ctypes, sys
@@ -60,12 +76,14 @@ doorbell_request = {
 	"platformKey": "windows"
 }
 
+uri = requests.get("https://prod.doorbellmat.w2.mtgarena.com/doorbell.config").text
+
 text: str = "https://prod.doorbellmat.w2.mtgarena.com"
 if "https://prod" in text:
 	doorCode = "46u7OAmyEZ6AtfgaPUHiXNiC55/mrtp3aAmE018KZamDhvr0vZ8mxg=="
 else:
 	doorCode = "ta4kBQcrBfdGd8AUjrv7lj9pYyA3Kkj9p39byJXuTdTBiZxRC6xgRQ=="
-uri = "https://doorbellprod.azurewebsites.net/api/ring?code=" + doorCode
+uri += "?code=" + doorCode # ? maybe not
 
 resp = requests.post(uri, data=json.dumps(doorbell_request, ensure_ascii=False, separators=(',', ':')).encode('utf-8'),
 				  headers={"content-type": "application/json"})
@@ -236,7 +254,7 @@ with socket.create_connection(address=(parse_result.hostname, parse_result.port)
         chatter = StreamChatter(ssock)
 
         resp = chatter.inquire(0, { # authenticate
-			"ClientVersion": "2023.29.10.4670",
+			"ClientVersion": full_client_version,
 			"Token": access_token,
             "PersonaId": None,
 			"ScreenName": None,
@@ -758,16 +776,13 @@ with socket.create_connection(address=(match_endpoint_host, match_endpoint_port)
                 return respond(msg)
 
         bot = MtgaBot()
+        gre_msgs = []
         for _ in range(40):
-            gre_msgs = chatter.get_gre_client_messages()
+            gre_msgs += chatter.get_gre_client_messages()
             # print(gre_msgs)
-            action_msgs = [msg
-                           for msg in gre_msgs
-                           if msg.type == pb.GREMessageType.GREMessageType_ActionsAvailableReq]
-            attack_msgs = [msg
-                           for msg in gre_msgs
-                           if msg.type == pb.GREMessageType.GREMessageType_DeclareAttackersReq]
-            req_msgs = [msg
+            print([name for msg in gre_msgs
+                   for name, value in pb.GREMessageType.items() if value == msg.type])
+            gre_msgs = [msg
                         for msg in gre_msgs
                         if msg.type in [pb.GREMessageType.GREMessageType_ActionsAvailableReq,
                                         pb.GREMessageType.GREMessageType_SelectTargetsReq,
@@ -777,11 +792,11 @@ with socket.create_connection(address=(match_endpoint_host, match_endpoint_port)
                                         ]
             ]
             # TODO: ClientMessageType_SubmitAttackersReq
-            for msg in req_msgs:
+            for msg in gre_msgs:
                 print(msg)
             else:
                 print("No actions for now!")
-            for action_msg in req_msgs:
+            # for action_msg in gre_msgs:
                 # if act := bot.handle_request(action_msg.actionsAvailableReq):
                 #     print(act)
                 #     trans_id = chatter.propose(
@@ -794,6 +809,8 @@ with socket.create_connection(address=(match_endpoint_host, match_endpoint_port)
                 #         )
                 #     )
                 #     break
+            while gre_msgs:
+                action_msg = gre_msgs.pop()
                 if act := bot.clr_respond(action_msg):
                     print(act)
                     trans_id = chatter.propose(
