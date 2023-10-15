@@ -600,14 +600,14 @@ class ProtoStreamChatter(StreamChatter):
         for _ in range(20):
             time.sleep(1)
             if trans_id:
-                chatter.admit()
+                self.admit()
             else:
-                trans_id = chatter.admit()
+                trans_id = self.admit()
             if trans_id and chatter.reply[trans_id]:
                 break
         
         return [msg
-            for trans in chatter.reply[trans_id] if hasattr(trans, 'greToClientEvent')
+            for trans in self.reply[trans_id] if hasattr(trans, 'greToClientEvent')
             for msg in trans.greToClientEvent.greToClientMessages]
         
 with socket.create_connection(address=(match_endpoint_host, match_endpoint_port)) as sock:
