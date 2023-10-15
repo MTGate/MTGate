@@ -4,7 +4,7 @@ from textual import on, work
 from textual.reactive import reactive
 
 from contexts.state_manager import state
-from contexts.connection_manager import FrontdoorChatter
+from contexts.connection_manager import FrontdoorChatter, BattlefieldChatter
 
 class MtgShow(App):
 
@@ -24,7 +24,7 @@ class MtgShow(App):
 
     def on_mount(self):
         from utils import ring_doorbell, fast_login
-        from globals.config import full_client_version
+        from globals.config import client_version, full_client_version
 
         fd_uri = ring_doorbell()
         account_info = fast_login()
@@ -34,8 +34,9 @@ class MtgShow(App):
         from urllib.parse import urlparse
         parse_result = urlparse(fd_uri)
 
-        self.chatter = FrontdoorChatter(parse_result.hostname, parse_result.port, 'cert.pem')
-        self.chatter.__enter__()
+        self.fd_chatter = FrontdoorChatter(parse_result.hostname, parse_result.port, 'cert.pem')
+        self.fd_chatter.__enter__()
+        self.bf_chatter = BattlefieldChatter(None, None, './cert.pem', client_version, None, None)
 
     def update_text(self, text):
         self.query_one(Label).update(text)
@@ -53,10 +54,10 @@ class MtgShow(App):
     async def submit(self, command: str) -> None:
         match command:
             case "authenticate":
-                self.update_text(self.chatter.authenticate(self.full_client_version,
+                self.update_text(self.fd_chatter.authenticate(self.full_client_version,
                                                             self.access_token))
             case "join match":
-                self.update_text(self.chatter.join_match())
+                self.update_text(self.fd_chatter.join_match())
 
     def on_exit(self):
-        self.chatter.__exit__()
+        self.fd_chatter.__exit__()
