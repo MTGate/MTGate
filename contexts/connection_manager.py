@@ -19,7 +19,7 @@ class FrontdoorChatter(ContextDecorator):
         self.buf = b''
         self.flag = ''
         self.reply = {}
-        self.some_counter = 0
+        self.timeout_counter = 0
 
     def __enter__(self):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -31,6 +31,7 @@ class FrontdoorChatter(ContextDecorator):
 
     def __exit__(self, *exc):
         self.sock.close()
+        self.sock = None
     
     @staticmethod
     def add_header(data: str) -> bytes:
@@ -43,10 +44,12 @@ class FrontdoorChatter(ContextDecorator):
             self.buf += self.sock.recv()
         except TimeoutError:
             pass
-        if self.some_counter > 6:
-             raise b''
+        if self.timeout_counter > 6:
+            self.ping()
+            if self.timeout_counter > 12:
+                raise TimeoutError
         if len(self.buf) == 0: # timeout test
-            self.some_counter += 1
+            self.timeout_counter += 1
             return b''
         if len(self.buf) < 6:
             raise RuntimeError(self.buf)
@@ -204,16 +207,16 @@ class FrontdoorChatter(ContextDecorator):
 
                 # Matchmaking.onMatchCreated, MatchSceneManager.onMatchReady
                 resp = json.loads(resp["Payload"])
-                controller_fabric_uri = resp["MatchInfo"]["McFabricId"]
-                match_endpoint_host = resp["MatchInfo"]["MatchEndpointHost"]
-                match_endpoint_port = resp["MatchInfo"]["MatchEndpointPort"]
+                self.controller_fabric_uri = resp["MatchInfo"]["McFabricId"]
+                self.match_endpoint_host = resp["MatchInfo"]["MatchEndpointHost"]
+                self.match_endpoint_port = resp["MatchInfo"]["MatchEndpointPort"]
                 opponent_screen_name = resp["MatchInfo"]["OpponentScreenName"]
                 # opponentIsWotc, Battlefield, OpponentRankingClass, ClientMetadata,
                 # OpponentEmotesSelection, OpponentEmotesSelection, OpponentPetSelection,
                 # PetSelection, OpponentSleeveSelection, OpponentAvatarSelection,
                 # AvatarSelection,
-                match_id = resp["MatchInfo"]["MatchId"]
-                event_id = resp["MatchInfo"]["EventId"]
+                self.match_id = resp["MatchInfo"]["MatchId"]
+                self.event_id = resp["MatchInfo"]["EventId"]
                 
                 return "match created!"
             
@@ -228,8 +231,12 @@ class BattlefieldChatter(FrontdoorChatter):
         self.fabric_uri = fabric_uri
         super().__init__(host, port, certfile, timeout)
     
+    @staticmethod
+    def add_header(data: bytes) -> bytes:
+        return bytes([3, 1]) + len(data).to_bytes(4, 'little') + data
+    
     def speak(self, message: pb.ClientToMatchServiceMessage):
-        self.ssock.send(BattlefieldChatter.add_header(message.SerializeToString()))
+        self.sock.send(BattlefieldChatter.add_header(message.SerializeToString()))
 
     def propose(self, ty: pb.ClientToMatchServiceMessageType, payload) -> str:
         self.request_id += 1

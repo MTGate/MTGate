@@ -1,4 +1,4 @@
-import config
+from globals import config
 
 assembly_path = config.MTGA_folder + r"/MTGA_Data/Managed/"
 
