@@ -1,4 +1,5 @@
 from globals.config import client_version, full_client_version
+from globals.externals import pb
 from textual.app import App, ComposeResult
 from textual.widget import Widget
 from textual.widgets import Label, Input, Static, Button
@@ -41,9 +42,10 @@ MessageBox {
 }
 #input_box {
     dock: bottom;
-    height: auto;
+    height: 20%;
     width: 70%;
     margin: 0 0 2 0;
+    background: red 10%;
     align_horizontal: right;
 }
 '''
@@ -113,8 +115,7 @@ MessageBox {
                 self.bf_chatter.host = self.fd_chatter.match_endpoint_host
                 self.bf_chatter.port = self.fd_chatter.match_endpoint_port
                 self.bf_chatter.__enter__()
-            case "auth_duel":
-                from globals.externals import pb
+            # case "auth_duel":
                 if hasattr(self, "bf_chatter") and self.bf_chatter.sock:
                     self.call_from_thread(self.add_message, "authenticating duel ...")
                     trans_id = self.bf_chatter.propose(
@@ -130,16 +131,15 @@ MessageBox {
                         )
                     )
                     
-                    log(f"authing duel begins")
-                    for lc in range(20):
-                        import time
-                        time.sleep(1)
-                        log(f"authing duel: {lc} seconds")
+                    def update_bf_message():
                         self.bf_chatter.admit()
-                        if self.bf_chatter.reply[trans_id]:
-                            log(f"authing duel: finishes")
-                            self.call_from_thread(self.add_message, "Duel access authenticated!")
-                            break
+                        if trans_id in self.bf_chatter.reply:
+                            self.add_message("Duel access authenticated!")
+                            log(self.bf_chatter.reply[trans_id])
+                            self.update_bf_message.pause()
+                    self.update_bf_message = self.call_from_thread(self.set_interval,
+                                                                   1, update_bf_message, repeat=20
+                                                                   )
             case "connect_room":
                 if hasattr(self, "bf_chatter") and self.bf_chatter.sock:
                     self.call_from_thread(self.add_message, "connecting to room ...")
@@ -148,16 +148,18 @@ MessageBox {
                         self.bf_chatter.construct_door_connect_request()
                     )
 
-                    counter = 0
-                    for _ in range(20):
-                        time.sleep(1)
+                    cnt = [0]
+                    def update_bf_message(cnt=cnt):
                         self.bf_chatter.admit()
-                        if self.bf_chatter.reply[trans_id]:
-                            counter += 1
-                            self.call_from_thread(self.add_message, "Room state updated!")
-                            self.call_from_thread(self.add_message, self.bf_chatter.reply[trans_id][counter])
-                            if counter >= 2:
-                                break
+                        if trans_id in self.bf_chatter.reply:
+                            self.add_message("Room state updated!")
+                            self.add_message(self.bf_chatter.reply[trans_id][cnt[0]])
+                            cnt[0] += 1
+                            if cnt[0] >= 2:
+                                self.update_bf_message.pause()
+                    self.update_bf_message = self.call_from_thread(self.set_interval,
+                                                                   1, update_bf_message, repeat=20
+                                                                   )
             case "state":
                 if hasattr(self, "bf_chatter") and self.bf_chatter.sock:
                     self.call_from_thread(self.add_message, "retrieving state ...")
