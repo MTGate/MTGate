@@ -12,6 +12,39 @@ from contexts.connection_manager import FrontdoorChatter, BattlefieldChatter
 class FocusableContainer(Container, can_focus=True):
     """Focusable container widget."""
 
+class MessageQueue(Container, can_focus=True):
+    """A message queue to display begin and end events"""
+    open_queue: dict = {}
+    # def __init__(self,  *args, **kwargs) -> None:
+    #     super.__init__(*args, **kwargs)
+
+    def add_message(self, context: str, parent="", lasting=True, end=False):
+        if end:
+            self.open_queue[context].to_finished()
+            self.open_queue.pop(context)
+        else:
+            if lasting and context in self.open_queue:
+                self.mount(MessageNode(context + " name used."))
+                return
+            indent = self.open_queue[parent].indent + "  " if parent in self.open_queue else ""
+            msg = MessageNode(context, indent)
+            if lasting:
+                msg.to_loading()
+                self.open_queue[context] = msg
+            self.mount(msg)
+
+class MessageNode(Widget, can_focus=True):
+    def __init__(self, context: str, indent="") -> None:
+        self.text = indent + context
+        self.indent = indent
+        self.label = context
+
+    def to_loading(self):
+        self.text = self.indent + self.label + " loading ..."
+
+    def to_finished(self):
+        self.text = self.indent + self.label + " finished!"
+
 class MessageBox(Widget, can_focus=True):
     def __init__(self, text: str) -> None:
         self.text = text
@@ -42,9 +75,9 @@ MessageBox {
 }
 #input_box {
     dock: bottom;
-    height: 20%;
+    height: 40%;
     width: 70%;
-    margin: 0 0 2 0;
+    margin: 0 0 1 0;
     background: red 10%;
     align_horizontal: right;
 }
@@ -54,6 +87,8 @@ MessageBox {
             yield MessageBox(
                 "UI instantiated, waiting for connection ..."
             )
+        with MessageQueue(id="message_queue") as mq:
+            mq.add_message("UI instantiated, TCP connection")
         with Horizontal(id="input_box"):
             yield Input(placeholder="Enter your message", id="message_input")
 
@@ -62,9 +97,44 @@ MessageBox {
         conversation_box.mount(MessageBox(message))
         conversation_box.scroll_end(animate=False)
 
+    @work(thread=True)
+    async def add_message_yielder(self, message: str, func):
+        message_queue: MessageQueue = self.call_from_thread(self.query_one, "#message_queue")
+        self.call_from_thread(message_queue.add_mesage, message)
+        last_message = ""
+        for next_message in func():
+            if last_message != "":
+                self.call_from_thread(message_queue.add_message, last_message, parent=message, end=True)
+            self.call_from_thread(message_queue.add_message, next_message, parent=message)
+            message_queue.scroll_end(animate=False)
+
     async def on_mount(self):
         self.load_front_door()
+        # self.add_message_yielder(self.load_front_door_yielder)
         self.query_one(Input).focus()
+
+    def load_front_door_yielder(self):
+        from requests import ConnectTimeout
+        try:
+            from utils import ring_doorbell, fast_login
+            yield "ring doorbell"
+            fd_uri = ring_doorbell()
+            yield "fast log in"
+            account_info = fast_login()
+            yield "parse info"
+            self.access_token = account_info["access_token"]
+            self.refresh_token = account_info["refresh_token"]
+            self.persona_id = account_info["persona_id"]
+            from urllib.parse import urlparse
+            parse_result = urlparse(fd_uri)
+
+            yield "init front door connection"
+            self.fd_chatter = FrontdoorChatter(parse_result.hostname, parse_result.port, 'cert.pem')
+            self.fd_chatter.__enter__()
+            yield "init battlefield connection"
+            self.bf_chatter = BattlefieldChatter(None, None, './cert.pem', client_version, None, None)
+        except (ConnectTimeout, TimeoutError):
+            yield "failed to init tcp connection"
 
     @work(thread=True)
     def load_front_door(self) -> bool:
