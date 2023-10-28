@@ -52,7 +52,7 @@ class FrontdoorChatter(ContextDecorator):
             self.timeout_counter += 1
             return b''
         if len(self.buf) < 6:
-            raise RuntimeError(self.buf)
+            raise RuntimeError("corrupted data: " + self.buf)
         if self.buf[0] == 0x03 and self.buf[1] == 0x02: # ping
             length = int.from_bytes(self.buf[2:6], 'little')
             assert length == 4
@@ -73,7 +73,7 @@ class FrontdoorChatter(ContextDecorator):
             self.buf = self.buf[(length+6):]
             return temp
         else:
-            raise RuntimeError(self.buf)
+            raise RuntimeError("bad data protocol: " + self.buf)
 
     def speak(self, message: dict):
         self.sock.send(FrontdoorChatter.add_header(json.dumps(message, separators=(',', ':'))))
@@ -229,6 +229,7 @@ class BattlefieldChatter(FrontdoorChatter):
         self.client_version = client_version
         self.match_id = match_id
         self.fabric_uri = fabric_uri
+        self.queue = []
         super().__init__(host, port, certfile, timeout)
     
     @staticmethod
@@ -256,12 +257,13 @@ class BattlefieldChatter(FrontdoorChatter):
         if 'valid' == self.flag:
             msg = pb.MatchServiceToClientMessage()
             msg.ParseFromString(resp)
+            self.queue.append(msg)
             self.flag = ''
             if msg.transactionId in self.reply:
                 self.reply[msg.transactionId] += [msg]
             else:
                 self.reply[msg.transactionId] = [msg]
-                return msg.transactionId
+            return msg.transactionId
 
     def construct_door_connect_request(self) -> pb.ClientToMatchDoorConnectRequest:
         connect_message = pb.ClientToGREMessage(
