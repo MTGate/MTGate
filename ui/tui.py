@@ -9,7 +9,7 @@ from textual import on, work, log
 from textual.reactive import reactive
 from textual.worker import Worker, WorkerState
 
-from contexts.game_manager import GameManager
+from contexts.game_manager import GameManager, StateWrapper
 from contexts.connection_manager import FrontdoorChatter, BattlefieldChatter
 
 
@@ -91,7 +91,7 @@ Screen {
     async def on_mount(self):
         self.query_one(Input).focus()
         self.bf_state_updater = self.set_interval(
-            0.5, self.update_state, name="updater", repeat=5, pause=True
+            4, self.update_state, name="updater", pause=True
         )
         self.last_input = None
 
@@ -137,8 +137,9 @@ Screen {
                 last_message = message
             self.call_from_thread(mq.add_end, last_message)
             self.call_from_thread(mq.add_end, yielder.__name__)
-        except (OSError, TimeoutError):
+        except (OSError, TimeoutError) as e:
             self.call_from_thread(mq.add_fail, yielder.__name__)
+            raise e
 
     def load_front_door_yielder(self):
         from requests import ConnectTimeout
@@ -150,8 +151,7 @@ Screen {
         try:
             account_info = fast_login()
         except Exception as e:
-            yield "error raised", e
-            return
+            raise e
         yield "parse info", account_info
         self.access_token = account_info["access_token"]
         self.refresh_token = account_info["refresh_token"]
@@ -167,7 +167,7 @@ Screen {
         self.fd_chatter.__enter__()
         yield "init battlefield connection"
         self.bf_chatter = BattlefieldChatter(
-            None, None, "./cert.pem", client_version, None, None
+            None, None, "./cert.pem", client_version, None, None, timeout=0.2
         )
 
     @on(Input.Submitted)
@@ -245,7 +245,57 @@ Screen {
         state, reply = self.game_manager.update(self.last_input)
         self.last_input = None
         log(self.game_manager.last_msg)
-        # self.update_state(state, reply)
+        if reply:
+            trans_id = self.bf_chatter.propose(
+                pb.ClientToMatchServiceMessageType.ClientToMatchServiceMessageType_ClientToGREMessage,
+                reply,
+            )
+
+        def update_state_str(state: StateWrapper):
+            my_hand = [
+                instance["name"] for instance in state.get_zone_cards("ZoneType_Hand")
+            ]
+            opponent_hand = len([state.get_zone_cards("ZoneType_Hand", False)])
+            my_deck = len([state.get_zone_cards("ZoneType_Library")])
+            opponent_deck = len([state.get_zone_cards("ZoneType_Library", False)])
+            my_grave = len([state.get_zone_cards("ZoneType_Graveyard")])
+            opponent_grave = len([state.get_zone_cards("ZoneType_Graveyard", False)])
+            my_exile = len([state.get_zone_cards("ZoneType_Exile")])
+            opponent_exile = len([state.get_zone_cards("ZoneType_Exile", False)])
+            my_field = [
+                instance["name"]
+                for instance in state.get_zone_cards("ZoneType_Battlefield")
+            ]
+            opponent_field = [
+                instance["name"]
+                for instance in state.get_zone_cards("ZoneType_Battlefield")
+            ]
+            stack = [
+                instance["name"] for instance in state.get_zone_cards("ZoneType_Stack")
+            ]
+            self.state_str.update(
+                f"your hand: {my_hand}\n"
+                f"your field: {my_field}\n"
+                f"your opponent's field: {opponent_field}\n"
+                f"your opponent's hand: {opponent_hand}\n"
+                f"your deck: {my_deck}\n"
+                f"your opponent's deck: {opponent_deck}\n"
+                f"your GY: {my_grave}\n"
+                f"your oppenent's GY: {opponent_grave}\n"
+                f"your exile: {my_exile}\n"
+                f"your opponent's exile: {opponent_exile}\n"
+            )
+
+        if not hasattr(self, "recorder"):
+            self.recorder = VerticalScroll()
+            self.mount(self.recorder)
+            self.state_str = Static()
+            self.recorder.mount(self.state_str)
+        if state:
+            try:
+                update_state_str(state)
+            except Exception as e:
+                log(e)
 
     def connect_room_yielder(self):
         if hasattr(self, "bf_chatter") and self.bf_chatter.sock:
