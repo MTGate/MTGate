@@ -96,16 +96,20 @@ Screen {
         self.last_input = None
 
         def init_queue():
-            yield self.yielder_submit(self.load_front_door_yielder)
-            yield self.yielder_submit(self.auth_yielder)
-            yield self.yielder_submit(self.join_yielder)
-            yield self.yielder_submit(self.authduel_yielder)
-            yield self.yielder_submit(self.connect_room_yielder)
+            try:
+                yield self.yielder_submit(self.load_front_door_yielder)
+                yield self.yielder_submit(self.auth_yielder)
+                yield self.yielder_submit(self.join_yielder)
+                yield self.yielder_submit(self.authduel_yielder)
+                yield self.yielder_submit(self.connect_room_yielder)
+            except:
+                pass
 
         self.init_queue = init_queue()
         next(self.init_queue, None)
 
-    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+    async def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        """see https://github.com/Textualize/textual/discussions/3174"""
         if event.state == WorkerState.SUCCESS:
             if hasattr(self, "init_queue") and self.init_queue:
                 if not next(self.init_queue, None):
@@ -113,6 +117,10 @@ Screen {
                     self.on_worker_state_changed = lambda self, event: None
         elif event.state == WorkerState.ERROR:
             self.__delattr__("init_queue")
+            try:
+                await event.worker.wait()
+            except:
+                pass
             self.on_worker_state_changed = lambda self, event: None
 
     @work(thread=True)
@@ -120,6 +128,8 @@ Screen {
         mq = self.query_one(MessageQueue)
         last_message = ""
         self.call_from_thread(mq.add_begin, yielder.__name__)
+        from requests import ConnectTimeout
+
         try:
             full_message = None
             for message in self.call_from_thread(yielder):
@@ -127,7 +137,9 @@ Screen {
                     case (summary, payload):
                         message = summary
                         full_message = payload
-                    case _:
+                    case e if isinstance(e, Exception):
+                        raise e
+                    case s if isinstance(s, str):
                         full_message = None
                 if last_message != "":
                     self.call_from_thread(
@@ -137,12 +149,11 @@ Screen {
                 last_message = message
             self.call_from_thread(mq.add_end, last_message)
             self.call_from_thread(mq.add_end, yielder.__name__)
-        except (OSError, TimeoutError) as e:
+        except (OSError, TimeoutError, ConnectTimeout) as e:
             self.call_from_thread(mq.add_fail, yielder.__name__)
             raise e
 
     def load_front_door_yielder(self):
-        from requests import ConnectTimeout
         from utils import ring_doorbell, fast_login
 
         yield "ring doorbell"
@@ -151,7 +162,8 @@ Screen {
         try:
             account_info = fast_login()
         except Exception as e:
-            raise e
+            yield e
+            return
         yield "parse info", account_info
         self.access_token = account_info["access_token"]
         self.refresh_token = account_info["refresh_token"]
@@ -164,7 +176,11 @@ Screen {
         self.fd_chatter = FrontdoorChatter(
             parse_result.hostname, parse_result.port, "cert.pem"
         )
-        self.fd_chatter.__enter__()
+        try:
+            self.fd_chatter.__enter__()
+        except Exception as e:
+            yield e
+            return
         yield "init battlefield connection"
         self.bf_chatter = BattlefieldChatter(
             None, None, "./cert.pem", client_version, None, None, timeout=0.2
@@ -242,9 +258,14 @@ Screen {
             yield "all done"
 
     def update_state(self):
-        state, reply = self.game_manager.update(self.last_input)
-        self.last_input = None
-        log(self.game_manager.last_msg)
+        state = None
+        reply = None
+        try:
+            state, reply = self.game_manager.update(self.last_input)
+            self.last_input = None
+        except Exception as e:
+            log(e)
+
         if reply:
             trans_id = self.bf_chatter.propose(
                 pb.ClientToMatchServiceMessageType.ClientToMatchServiceMessageType_ClientToGREMessage,
@@ -253,30 +274,28 @@ Screen {
 
         def update_state_str(state: StateWrapper):
             my_hand = [
-                instance["name"] for instance in state.get_zone_cards("ZoneType_Hand")
+                instance.name for instance in state.get_zone_cards("ZoneType_Hand")
             ]
-            opponent_hand = len([state.get_zone_cards("ZoneType_Hand", False)])
-            my_deck = len([state.get_zone_cards("ZoneType_Library")])
-            opponent_deck = len([state.get_zone_cards("ZoneType_Library", False)])
-            my_grave = len([state.get_zone_cards("ZoneType_Graveyard")])
-            opponent_grave = len([state.get_zone_cards("ZoneType_Graveyard", False)])
-            my_exile = len([state.get_zone_cards("ZoneType_Exile")])
-            opponent_exile = len([state.get_zone_cards("ZoneType_Exile", False)])
-            my_field = [
-                instance["name"]
-                for instance in state.get_zone_cards("ZoneType_Battlefield")
+            opponent_hand = len(state.get_zone_cards("ZoneType_Hand", False))
+            my_deck = len(state.get_zone_cards("ZoneType_Library"))
+            opponent_deck = len(state.get_zone_cards("ZoneType_Library", False))
+            my_grave = len(state.get_zone_cards("ZoneType_Graveyard"))
+            opponent_grave = len(state.get_zone_cards("ZoneType_Graveyard", False))
+            my_exile = len(state.get_zone_cards("ZoneType_Exile"))
+            opponent_exile = len(state.get_zone_cards("ZoneType_Exile", False))
+            the_field = [
+                instance.name
+                for instance in state.get_zone_cards("ZoneType_Battlefield", None)
             ]
-            opponent_field = [
-                instance["name"]
-                for instance in state.get_zone_cards("ZoneType_Battlefield")
+            the_stack = [
+                instance.name
+                for instance in state.get_zone_cards("ZoneType_Stack", None)
             ]
-            stack = [
-                instance["name"] for instance in state.get_zone_cards("ZoneType_Stack")
-            ]
+
             self.state_str.update(
                 f"your hand: {my_hand}\n"
-                f"your field: {my_field}\n"
-                f"your opponent's field: {opponent_field}\n"
+                f"the field: {the_field}\n"
+                f"the stack: {the_stack}\n"
                 f"your opponent's hand: {opponent_hand}\n"
                 f"your deck: {my_deck}\n"
                 f"your opponent's deck: {opponent_deck}\n"
@@ -284,6 +303,7 @@ Screen {
                 f"your oppenent's GY: {opponent_grave}\n"
                 f"your exile: {my_exile}\n"
                 f"your opponent's exile: {opponent_exile}\n"
+                f"{state.state.all_cards}"
             )
 
         if not hasattr(self, "recorder"):
