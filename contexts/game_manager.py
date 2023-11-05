@@ -2215,9 +2215,6 @@ class StateWrapper:
             )
 
     def update_instance(self, instance: pb.GameObjectInfo):
-        from textual import log
-
-        log(instance)
         if instance.instanceId in self.state.all_cards and (
             inst := self.state.all_cards[instance.instanceId]
         ):
@@ -2226,9 +2223,13 @@ class StateWrapper:
         else:
             self.state.all_cards[instance.instanceId] = CardInstance(
                 id=instance.instanceId,
+                grp_id=instance.grpId,
                 name=instance.name,
                 overlay_grp_id=instance.overlayGrpId,
             )
+
+    def update_timer(self, timer_message: pb.TimerStateMessage):
+        pass
 
     def update_with(self, state_message: pb.GameStateMessage):
         match state_message.type:
@@ -2277,7 +2278,7 @@ class StateWrapper:
         return [
             c
             if id in self.state.all_cards and (c := self.state.all_cards[id])
-            else CardInstance(id=id, name="unknown", overlay_grp_id="unknown")
+            else CardInstance(id=id, grp_id=0, name="unknown", overlay_grp_id="unknown")
             for id in instance_ids
         ]
 
@@ -2298,6 +2299,7 @@ class GameManager:
         self.input = 0
         self.last_msg = None
         self.last_req = []
+        self.last_choices = []
 
     # used in a loop
     def update(self, command):
@@ -2330,13 +2332,16 @@ class GameManager:
                         if len(msg.systemSeatIds) == 1:
                             self.state.local_id = msg.systemSeatIds[0]
                     case pb.GREMessageType.GREMessageType_GameStateMessage:
-                        log(msg)
                         self.state.update_with(msg.gameStateMessage)
+                    case pb.GREMessageType.GREMessageType_TimerStateMessage:
+                        self.state.update_timer(msg.timerStateMessage)
                     case pb.GREMessageType.GREMessageType_MulliganReq:
                         self.last_req += [msg]
                     case pb.GREMessageType.GREMessageType_ActionsAvailableReq:
                         self.last_req += [msg]
                     case pb.GREMessageType.GREMessageType_ChooseStartingPlayerReq:
+                        self.last_req += [msg]
+                    case pb.GREMessageType.GREMessageType_PromptReq:
                         self.last_req += [msg]
                     case pb.GREMessageType.GREMessageType_DieRollResultsResp:
                         log(
@@ -2357,13 +2362,91 @@ class GameManager:
 
         self.last_msg = raw_message
 
-        log("quit update_state")
+    def get_available_options(self, req: pb.GREToClientMessage = None) -> str:
+        if req == None and self.last_req:
+            req = self.last_req[-1]
+        if req == None:
+            return str(self.last_choices)
+
+        def highlighted_move(action: pb.Action) -> bool:
+            if action == None:
+                return False
+            # not affordable
+            if not (
+                (
+                    action.actionType == pb.ActionType.ActionType_Play
+                    or action.actionType == pb.ActionType.ActionType_PlayMDFC
+                )
+                or (len(action.autoTapSolution.autoTapActions) > 0)
+                or (
+                    all(
+                        [
+                            pb.ManaColor.ManaColor_Phyrexian in requirement.color
+                            or pb.ManaColor.ManaColor_X in requirement.color
+                            for requirement in action.manaCost
+                        ]
+                    )
+                )
+            ):
+                return False
+            if (
+                action.abilityGrpId == 75081
+                and action.highlight == pb.HighlightType.HighlightType_Cold
+                and action.actionType == pb.ActionType.ActionType_Activate
+            ):
+                return False
+            if action.highlight == pb.HighlightType.HighlightType_Hot:
+                return True
+            # shouldn't play, temp unavailable
+            # if action.abilityGrpId != 0 and instance.PlayWarnings.Exists((ShouldntPlayData x) => x.AbilityId == action.AbilityGrpId):
+            #     return False
+            return True
+
+        from textual import log
+
+        log(f"pending req: {req}")
+        self.last_choices = [req]
+        match req.type:
+            case pb.GREMessageType.GREMessageType_ActionsAvailableReq:
+                self.last_choices = [
+                    action
+                    for action in req.actionsAvailableReq.actions
+                    if highlighted_move(action)
+                ]
+                return str(self.last_choices)
+            case pb.GREMessageType.GREMessageType_MulliganReq:
+                return str(req)
+            case pb.GREMessageType.GREMessageType_ChooseStartingPlayerReq:
+                return str(req)
+            case _:
+                return str(req)
 
     def decide_reply(self, command, auto_respond) -> pb.ClientToGREMessage | None:
+        from textual import log
+
         if not self.last_req:
             return None
         ### TODO: only if the resp is relevent to the req, pop this req
         req = self.last_req.pop()
+        try:
+            log(f"here is {command=}")
+            choice_num = int(command)
+            if choice_num in self.last_choices:
+                choice = self.last_choices[choice_num]
+                self.last_choices = []
+                log(choice)
+                return pb.ClientToGREMessage(
+                    type=pb.ClientMessageType.ClientMessageType_PerformActionResp,
+                    gameStateId=req.gameStateId,
+                    respId=req.msgId,
+                    performActionResp=pb.PerformActionResp(
+                        autoPassPriority=pb.AutoPassPriority.AutoPassPriority_Yes,
+                        actions=[choice],
+                    ),
+                )
+        except:
+            pass
+
         match req.type:
             case pb.GREMessageType.GREMessageType_ChooseStartingPlayerReq:
                 return pb.ClientToGREMessage(

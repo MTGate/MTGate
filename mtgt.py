@@ -1,4 +1,4 @@
-from ui.tui import MtgShow
+from tui.base import MtgShow
 from contexts.connection_manager import FrontdoorChatter
 
 if __name__ == "__main__":

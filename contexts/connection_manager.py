@@ -45,7 +45,10 @@ class FrontdoorChatter(ContextDecorator):
         except TimeoutError:
             pass
         if self.timeout_counter > 6:
-            self.ping()
+            try:
+                self.ping()
+            except:
+                pass
             if self.timeout_counter > 12:
                 raise TimeoutError
         if len(self.buf) == 0: # timeout test

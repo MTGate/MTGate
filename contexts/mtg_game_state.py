@@ -34,6 +34,7 @@ class Effect:
 class CardInstance:
     id: int
     name: int
+    grp_id: int
     # mana_cost_override: list
     # object_type: gre.GameObjectType
     # has_summoning_sickness: bool

@@ -273,8 +273,14 @@ Screen {
             )
 
         def update_state_str(state: StateWrapper):
+            from contexts.card_oracle import query
+
+            def query_name(id: int) -> str:
+                return tup[0] if (tup := query(id)) else "unknown"
+
             my_hand = [
-                instance.name for instance in state.get_zone_cards("ZoneType_Hand")
+                query_name(instance.overlay_grp_id)
+                for instance in state.get_zone_cards("ZoneType_Hand")
             ]
             opponent_hand = len(state.get_zone_cards("ZoneType_Hand", False))
             my_deck = len(state.get_zone_cards("ZoneType_Library"))
@@ -284,11 +290,11 @@ Screen {
             my_exile = len(state.get_zone_cards("ZoneType_Exile"))
             opponent_exile = len(state.get_zone_cards("ZoneType_Exile", False))
             the_field = [
-                instance.name
+                query_name(instance.overlay_grp_id)
                 for instance in state.get_zone_cards("ZoneType_Battlefield", None)
             ]
             the_stack = [
-                instance.name
+                query_name(instance.overlay_grp_id)
                 for instance in state.get_zone_cards("ZoneType_Stack", None)
             ]
 
@@ -303,7 +309,7 @@ Screen {
                 f"your oppenent's GY: {opponent_grave}\n"
                 f"your exile: {my_exile}\n"
                 f"your opponent's exile: {opponent_exile}\n"
-                f"{state.state.all_cards}"
+                f"options:\n{self.game_manager.get_available_options()}"
             )
 
         if not hasattr(self, "recorder"):

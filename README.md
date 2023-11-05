@@ -21,6 +21,7 @@ As stated above, there are some limitations now.
 - [ ] built-in card play
 - [ ] re-connect and custom network route support
 - [ ] (T)UI
+    - [x] basic framwork
     - [ ] advanced and customizable information display
     - [ ] REPL
 - [ ] more format and deck support
@@ -31,7 +32,9 @@ As stated above, there are some limitations now.
 
 ## Current progress
 
-I'm going to promote the auto play feature for some time.
+I'm improving the TUI and interaction.
+
+It now lacks some features like error handling when the network fails before or during gameplay.
 
 ## About the name
 
