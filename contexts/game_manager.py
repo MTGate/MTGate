@@ -2402,9 +2402,6 @@ class GameManager:
             #     return False
             return True
 
-        from textual import log
-
-        log(f"pending req: {req}")
         self.last_choices = [req]
         match req.type:
             case pb.GREMessageType.GREMessageType_ActionsAvailableReq:
@@ -2429,7 +2426,7 @@ class GameManager:
         ### TODO: only if the resp is relevent to the req, pop this req
         req = self.last_req.pop()
         try:
-            log(f"here is {command=}")
+            log(f"here is {command=} and {req=}")
             choice_num = int(command)
             if choice_num in self.last_choices:
                 choice = self.last_choices[choice_num]
@@ -2468,6 +2465,20 @@ class GameManager:
                         decision=pb.MulliganOption.MulliganOption_AcceptHand
                     ),
                 )
+            case pb.GREMessageType.GREMessageType_ActionsAvailableReq:
+                if self.last_choices:
+                    choice = self.last_choices[0]
+                    self.last_choices = []
+                    log(choice)
+                    return pb.ClientToGREMessage(
+                        type=pb.ClientMessageType.ClientMessageType_PerformActionResp,
+                        gameStateId=req.gameStateId,
+                        respId=req.msgId,
+                        performActionResp=pb.PerformActionResp(
+                            autoPassPriority=pb.AutoPassPriority.AutoPassPriority_Yes,
+                            actions=[choice],
+                        ),
+                    )
             case _:
                 pass
         return None
