@@ -1,3 +1,4 @@
+from io import TextIOWrapper
 from contexts.connection_manager import BattlefieldChatter
 from globals.externals import pb
 from contexts.mtg_game_state import CardInstance, MtgGameState, Player, Zone
@@ -2292,14 +2293,23 @@ class DefaultStrategy:
 
 
 class GameManager:
-    def __init__(self, bf_chatter: BattlefieldChatter, strategy):
+    def __init__(
+        self, bf_chatter: BattlefieldChatter, log_file: TextIOWrapper, strategy
+    ):
         self.bf_chatter = bf_chatter
+        self.log_file = log_file
         self.strategy = strategy or DefaultStrategy()
         self.state = StateWrapper()
         self.input = 0
         self.last_msg = None
         self.last_req = []
         self.last_choices = []
+
+    def blog(self, msg: str):
+        self.log_file.write(str(msg))
+        from textual import log
+
+        log(msg)
 
     # used in a loop
     def update(self, command):
@@ -2315,10 +2325,8 @@ class GameManager:
         return self.state, None
 
     def update_state(self, raw_message: pb.MatchServiceToClientMessage):
-        from textual import log
-
         if hasattr(raw_message, "greToClientEvent"):
-            log(
+            self.blog(
                 "\n".join(
                     name
                     for name, value in pb.GREMessageType.items()
@@ -2341,10 +2349,8 @@ class GameManager:
                         self.last_req += [msg]
                     case pb.GREMessageType.GREMessageType_ChooseStartingPlayerReq:
                         self.last_req += [msg]
-                    case pb.GREMessageType.GREMessageType_PromptReq:
-                        self.last_req += [msg]
                     case pb.GREMessageType.GREMessageType_DieRollResultsResp:
-                        log(
+                        self.blog(
                             "\n".join(
                                 [
                                     f"player {roll.systemSeatId} rolls {roll.rollValue}"
@@ -2353,12 +2359,12 @@ class GameManager:
                             )
                         )
                     case pb.GREMessageType.GREMessageType_UIMessage:
-                        log("UI message")
+                        self.blog("UI message")
                     case _:
-                        log(msg)
+                        self.blog(msg)
 
         else:
-            log(raw_message)
+            self.blog(raw_message)
 
         self.last_msg = raw_message
 
@@ -2368,6 +2374,8 @@ class GameManager:
         if req == None:
             return str(self.last_choices)
 
+        self.blog(f"get available actions {req=}")
+
         def highlighted_move(action: pb.Action) -> bool:
             if action == None:
                 return False
@@ -2376,6 +2384,7 @@ class GameManager:
                 (
                     action.actionType == pb.ActionType.ActionType_Play
                     or action.actionType == pb.ActionType.ActionType_PlayMDFC
+                    or action.actionType == pb.ActionType.ActionType_Pass
                 )
                 or (len(action.autoTapSolution.autoTapActions) > 0)
                 or (
@@ -2410,6 +2419,7 @@ class GameManager:
                     for action in req.actionsAvailableReq.actions
                     if highlighted_move(action)
                 ]
+                self.blog(f"last choice {self.last_choices=}")
                 return str(self.last_choices)
             case pb.GREMessageType.GREMessageType_MulliganReq:
                 return str(req)
@@ -2419,19 +2429,17 @@ class GameManager:
                 return str(req)
 
     def decide_reply(self, command, auto_respond) -> pb.ClientToGREMessage | None:
-        from textual import log
-
+        self.blog(f"here is {command=} and {self.last_req=} and {self.last_choices=}")
         if not self.last_req:
             return None
         ### TODO: only if the resp is relevent to the req, pop this req
         req = self.last_req.pop()
         try:
-            log(f"here is {command=} and {req=}")
             choice_num = int(command)
             if choice_num in self.last_choices:
                 choice = self.last_choices[choice_num]
                 self.last_choices = []
-                log(choice)
+                self.blog(choice)
                 return pb.ClientToGREMessage(
                     type=pb.ClientMessageType.ClientMessageType_PerformActionResp,
                     gameStateId=req.gameStateId,
@@ -2466,19 +2474,23 @@ class GameManager:
                     ),
                 )
             case pb.GREMessageType.GREMessageType_ActionsAvailableReq:
+                if not self.last_choices:
+                    self.get_available_options(req)
                 if self.last_choices:
                     choice = self.last_choices[0]
                     self.last_choices = []
-                    log(choice)
-                    return pb.ClientToGREMessage(
-                        type=pb.ClientMessageType.ClientMessageType_PerformActionResp,
-                        gameStateId=req.gameStateId,
-                        respId=req.msgId,
-                        performActionResp=pb.PerformActionResp(
-                            autoPassPriority=pb.AutoPassPriority.AutoPassPriority_Yes,
-                            actions=[choice],
-                        ),
-                    )
+                    self.blog(f"{choice=}")
+
+                    if isinstance(choice, pb.Action):
+                        return pb.ClientToGREMessage(
+                            type=pb.ClientMessageType.ClientMessageType_PerformActionResp,
+                            gameStateId=req.gameStateId,
+                            respId=req.msgId,
+                            performActionResp=pb.PerformActionResp(
+                                autoPassPriority=pb.AutoPassPriority.AutoPassPriority_Yes,
+                                actions=[choice],
+                            ),
+                        )
             case _:
                 pass
         return None

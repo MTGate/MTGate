@@ -94,6 +94,7 @@ Screen {
             4, self.update_state, name="updater", pause=True
         )
         self.last_input = None
+        self.log_file = open("log.txt", "w+")
 
         def init_queue():
             try:
@@ -114,44 +115,34 @@ Screen {
             if hasattr(self, "init_queue") and self.init_queue:
                 if not next(self.init_queue, None):
                     self.__delattr__("init_queue")
-                    self.on_worker_state_changed = lambda self, event: None
         elif event.state == WorkerState.ERROR:
-            self.__delattr__("init_queue")
-            try:
-                await event.worker.wait()
-            except:
-                pass
-            self.on_worker_state_changed = lambda self, event: None
+            if hasattr(self, "init_queue"):
+                self.__delattr__("init_queue")
 
-    @work(thread=True)
+    @work(thread=True, exit_on_error=False)
     async def yielder_submit(self, yielder):
         mq = self.query_one(MessageQueue)
         last_message = ""
         self.call_from_thread(mq.add_begin, yielder.__name__)
         from requests import ConnectTimeout
 
-        try:
-            full_message = None
-            for message in self.call_from_thread(yielder):
-                match message:
-                    case (summary, payload):
-                        message = summary
-                        full_message = payload
-                    case e if isinstance(e, Exception):
-                        raise e
-                    case s if isinstance(s, str):
-                        full_message = None
-                if last_message != "":
-                    self.call_from_thread(
-                        mq.add_end, last_message, payload=full_message
-                    )
-                self.call_from_thread(mq.add_begin, message, parent=yielder.__name__)
-                last_message = message
-            self.call_from_thread(mq.add_end, last_message)
-            self.call_from_thread(mq.add_end, yielder.__name__)
-        except (OSError, TimeoutError, ConnectTimeout) as e:
-            self.call_from_thread(mq.add_fail, yielder.__name__)
-            raise e
+        full_message = None
+        for message in self.call_from_thread(yielder):
+            match message:
+                case (summary, payload):
+                    message = summary
+                    full_message = payload
+                case e if isinstance(e, Exception):
+                    self.call_from_thread(mq.add_fail, yielder.__name__)
+                    raise e
+                case s if isinstance(s, str):
+                    full_message = None
+            if last_message != "":
+                self.call_from_thread(mq.add_end, last_message, payload=full_message)
+            self.call_from_thread(mq.add_begin, message, parent=yielder.__name__)
+            last_message = message
+        self.call_from_thread(mq.add_end, last_message)
+        self.call_from_thread(mq.add_end, yielder.__name__)
 
     def load_front_door_yielder(self):
         from utils import ring_doorbell, fast_login
@@ -253,7 +244,7 @@ Screen {
             if trans_id not in self.bf_chatter.reply:
                 return
             yield "setting game manager", self.bf_chatter.reply[trans_id][0]
-            self.game_manager = GameManager(self.bf_chatter, None)
+            self.game_manager = GameManager(self.bf_chatter, self.log_file, None)
             self.bf_state_updater.resume()
             yield "all done"
 
@@ -263,8 +254,15 @@ Screen {
         try:
             state, reply = self.game_manager.update(self.last_input)
             self.last_input = None
+        except TimeoutError:
+            self.state_str.update("disconnected")
+            if hasattr(self, "bf_chatter") and self.bf_chatter:
+                self.bf_chatter.__exit__()
+            self.bf_state_updater.pause()
+            return
         except Exception as e:
-            log(e)
+            log(f"there is an error {e}")
+            return
 
         if reply:
             trans_id = self.bf_chatter.propose(
@@ -347,5 +345,6 @@ Screen {
 
     def on_exit(self):
         self.fd_chatter.__exit__()
+        self.log_file.close()
         if hasattr(self.bf_chatter, "__enter__"):
             self.bf_chatter.__exit__()
