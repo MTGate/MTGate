@@ -2305,11 +2305,13 @@ class GameManager:
         self.last_req = []
         self.last_choices = []
 
-    def blog(self, msg: str):
-        self.log_file.write(str(msg))
+    def blog(self, msg, write_to_file=True, write_to_command=True):
+        if write_to_file:
+            self.log_file.write(str(msg))
         from textual import log
 
-        log(msg)
+        if write_to_command:
+            log(msg)
 
     # used in a loop
     def update(self, command):
@@ -2325,6 +2327,7 @@ class GameManager:
         return self.state, None
 
     def update_state(self, raw_message: pb.MatchServiceToClientMessage):
+        self.blog(raw_message, True, False)
         if hasattr(raw_message, "greToClientEvent"):
             self.blog(
                 "\n".join(
@@ -2332,7 +2335,8 @@ class GameManager:
                     for name, value in pb.GREMessageType.items()
                     for msg in raw_message.greToClientEvent.greToClientMessages
                     if value == msg.type
-                )
+                ),
+                False,
             )
             for msg in raw_message.greToClientEvent.greToClientMessages:
                 match msg.type:
@@ -2356,15 +2360,16 @@ class GameManager:
                                     f"player {roll.systemSeatId} rolls {roll.rollValue}"
                                     for roll in msg.dieRollResultsResp.playerDieRolls
                                 ]
-                            )
+                            ),
+                            False,
                         )
                     case pb.GREMessageType.GREMessageType_UIMessage:
-                        self.blog("UI message")
+                        self.blog("UI message", False)
                     case _:
-                        self.blog(msg)
+                        self.blog(msg, False)
 
         else:
-            self.blog(raw_message)
+            self.blog(raw_message, False)
 
         self.last_msg = raw_message
 
@@ -2439,7 +2444,7 @@ class GameManager:
             if choice_num in self.last_choices:
                 choice = self.last_choices[choice_num]
                 self.last_choices = []
-                self.blog(choice)
+                self.blog(f"{choice=}")
                 return pb.ClientToGREMessage(
                     type=pb.ClientMessageType.ClientMessageType_PerformActionResp,
                     gameStateId=req.gameStateId,
