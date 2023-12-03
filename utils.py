@@ -124,6 +124,50 @@ def fast_login() -> dict:
     return resp.json()
 
 
+def fast_login_retry() -> dict:
+    refresh_token = get_reg_val(
+        winreg.HKEY_CURRENT_USER,
+        r"Software\\Wizards Of The Coast\\MTGA\\",
+        "WAS-RefreshTokenE",
+    )
+    import base64
+
+    refresh_token = base64.b64decode(str(refresh_token, "utf-8"))
+    refresh_token = str(refresh_token, "ascii").strip()
+
+    clientId = "N8QFG8NEBJ5T35FB"
+    clientSecret = "VMK1RE8YK6YR4EABJU91"
+
+    header = {
+        "Authorization": f"Basic {str(base64.b64encode(f'{clientId}:{clientSecret}'.encode()), 'utf-8')}",
+        "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+    }
+
+    from urllib.parse import urlencode
+
+    from globals.config import api_ip_pool
+
+    for ipaddr in api_ip_pool:
+        resp = None
+        try:
+            resp = requests.post(
+                f"https://{ipaddr}/auth/oauth/token",
+                headers=header,
+                data=urlencode(
+                    {"grant_type": "refresh_token", "refresh_token": refresh_token}
+                ),
+            )
+        except:
+            continue
+        else:
+            break
+    if not resp:
+        raise TimeoutError
+
+    access_token = resp.json()["access_token"]
+    refresh_token = resp.json()["refresh_token"]
+
+
 def pseudo_fast_login() -> dict:
     return {
         "access_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6ImQwNGMxYzYxNTkwNDBmZGRhN2FlYjI0ODViOWU0MTBlZDM0ZDJkMDgiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJOOFFGRzhORUJKNVQzNUZCIiwiZXhwIjoxNjk4NDgxNDE2LCJpYXQiOjE2OTg0ODA0NTYsImlzcyI6IlJFTjMzSzNGVFZDVkZOQks0UlRUWkFDWVQ0Iiwic3ViIjoiVERYUEdVRVRRNUZFSkdGRUxXSTNLR09MU1EiLCJ3b3RjLW5hbWUiOiJ6YWMjNDYxNTMiLCJ3b3RjLWRvbW4iOiJ3aXphcmRzIiwid290Yy1nYW1lIjoiYXJlbmEiLCJ3b3RjLWZsZ3MiOjEsIndvdGMtcm9scyI6WyJNRE5BTFBIQSJdLCJ3b3RjLXBybXMiOltdLCJ3b3RjLXNjcHMiOlsiZmlyc3QtcGFydHkiXSwid290Yy1wZGdyIjoiWUtGNFdJMlpSWkQ3REtWRzJOUzVaWlNOM1UiLCJ3b3RjLXNndHMiOltdLCJ3b3RjLXNvY2wiOnt9LCJ3b3RjLWNuc3QiOjB9.XXwAsFSSdAJ68S4kxITvecLBxnRUCplDpzGhfYVTODRoxg00ohzJhwEYJySfLfU-w9uyI4upF061PlreMoqAKy2fNHDqv7CueHuYPMPVYZ0CcaTcvlFBSkKn0XEoUJTGgaWEITwzzAAIJ5lnTp8Dk56ayIuWZ2Eh8aAH9Fv8NGKD33MAN2MSxtOOOxSAnJChzrlvQhjsQoWdIV9m1taHHAxlCpUa5P5b75WB3V0P1Aw8PwN1YUtIgwYGFKThp6rplh1i7HqkUNryz1xWm1va9bEJoMT3x1O32YhEyyd-Pt5b6pulbZhrQkBCaiBTMRh03X7m2ahuuHni9iZ2nbGAyw",
