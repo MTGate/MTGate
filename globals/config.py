@@ -29,3 +29,5 @@ api_ip_pool = [
     "23.39.65.72",
     "104.81.215.32",
 ]
+
+# look at https://dns.surf and its code to see if we can extract ip from cloudflare
